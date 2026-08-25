@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:"
+    />
+    <title>KJ FlowForge</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+     <div class="brand">
+       <h1>KJ FlowForge</h1>
+       <span id="header-meta" class="muted"></span>
+        <button id="refresh-state" class="ghost" type="button">새로고침</button>
+     </div>
+     <div id="integration-dots" class="integration-dots" title="Integration availability"></div>
+    </header>
+
+    <nav class="tab-bar" id="main-tabs" aria-label="Main tabs">
+      <button id="tab-dashboard" class="tab active" type="button" data-panel="dashboard">대시보드</button>
+      <button id="tab-settings" class="tab" type="button" data-panel="settings">설정</button>
+    </nav>
+
+    <section id="panel-dashboard" class="layout">
+      <section class="grid">
+        <div class="card">
+          <div class="card-head">
+            <h2>Git 커밋 / 푸시</h2>
+            <button id="git-refresh" class="ghost" type="button">새로고침</button>
+          </div>
+          <div class="stack">
+            <label>
+              저장소
+              <select id="git-repository"></select>
+            </label>
+            <div id="git-summary" class="muted"></div>
+            <div id="git-conflicts" class="conflicts" hidden></div>
+            <table class="table" id="git-files">
+              <thead>
+                <tr>
+                  <th>파일 경로</th>
+                  <th>Index</th>
+                  <th>Work tree</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+            <div class="row">
+              <button id="git-commit" type="button">변경사항 요약 후 커밋</button>
+              <button id="git-push" class="ghost" type="button">푸시</button>
+            </div>
+            <span id="git-error" class="error-text" role="alert"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="grid automation-grid">
+        <div class="card automation-card">
+          <div class="card-head">
+            <h2>08:00 Git 변경 분석 / Notion 일일작업</h2>
+            <span id="automation-state" class="status-pill">확인 중</span>
+          </div>
+          <div class="stack">
+            <label class="checkbox-row">
+              <input id="automation-enabled" type="checkbox" />
+              매일 오전 08:00 새 커밋 분석 및 일일작업 등록
+            </label>
+            <div id="automation-repositories" class="repository-list"></div>
+            <p class="muted">
+              설정 탭에서 추가한 저장소의 선택한 브랜치를 분석합니다. 자동 커밋, Push, 파일 변경은 수행하지 않습니다.
+            </p>
+            <div id="automation-next" class="muted"></div>
+            <div id="automation-last-run" class="automation-result"></div>
+            <div id="automation-pending-report" class="pending-report" hidden>
+              <h3>일일작업 미리보기 · <span id="pending-report-date"></span></h3>
+              <div id="pending-report-body" class="pending-report-body"></div>
+            </div>
+            <div class="row">
+              <button id="automation-save" class="ghost" type="button">설정 저장</button>
+              <button id="automation-preview" class="ghost" type="button">미리보기</button>
+              <button id="automation-publish" class="primary" type="button" hidden>Notion 등록</button>
+              <button id="automation-discord" class="ghost" type="button" hidden>Discord 전송</button>
+              <button id="automation-discard" class="ghost danger" type="button" hidden>취소</button>
+              <button id="automation-run" class="primary" type="button">지금 실행</button>
+              <span id="automation-message-text" class="error-text" role="alert"></span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </section>
+
+    <section id="panel-settings" class="layout" hidden>
+      <div class="card">
+        <div class="card-head">
+          <h2>환경 설정</h2>
+          <span id="settings-env-file" class="muted"></span>
+        </div>
+        <nav class="tab-bar sub" id="settings-tabs" aria-label="Settings tabs">
+          <button id="settings-tab-env" class="tab active" type="button" data-settings-panel="env">.env 수정</button>
+          <button id="settings-tab-git" class="tab" type="button" data-settings-panel="git">Git 저장소</button>
+          <button id="settings-tab-status" class="tab" type="button" data-settings-panel="status">연결 상태</button>
+        </nav>
+
+        <div id="settings-pane-env">
+          <p id="settings-api-missing" class="warn-banner" hidden>
+            Settings API가 아직 연결되지 않았습니다. main 프로세스에서
+            <code>getSettings</code> / <code>saveSettings</code> / <code>testIntegrations</code>를 구현한 뒤 재시작하세요.
+          </p>
+          <form id="settings-form" class="stack">
+            <div id="settings-groups" class="settings-groups"></div>
+            <div class="settings-actions">
+              <label class="checkbox-row">
+                <input id="settings-auto-save" type="checkbox" checked />
+                입력 즉시 자동 저장 (0.7초 후)
+              </label>
+              <div class="row">
+                <button id="settings-save" class="primary" type="submit">저장 &amp; 새로고침</button>
+                <button id="settings-test" class="ghost" type="button">연결 상태 테스트</button>
+              </div>
+            </div>
+            <div id="settings-restart" class="warn-banner" hidden></div>
+            <span id="settings-message" class="muted" role="status"></span>
+          </form>
+        </div>
+
+        <div id="settings-pane-git" hidden>
+          <p class="muted">
+               분야별 로컬 Git 저장소 폴더와 GitHub 저장소 URL을 설정하세요. 로컬 폴더는 커밋·푸시에 사용되고, URL은 원격 저장소를 식별하는 정보로 저장됩니다. Discord 알림 조건도 저장소별로 설정할 수 있습니다.
+          </p>
+          <div id="settings-repositories" class="repository-list"></div>
+          <div class="row">
+            <button id="settings-repository-add" class="ghost" type="button">+ 저장소 추가</button>
+          </div>
+          <div class="row">
+            <button id="settings-repositories-save" class="primary" type="button">저장소 설정 저장</button>
+            <span id="settings-repositories-message" class="error-text" role="alert"></span>
+          </div>
+        </div>
+
+        <div id="settings-pane-status" hidden>
+          <div id="integration-statuses" class="status-list"></div>
+          <div class="row">
+            <button id="settings-test-status" class="ghost" type="button">연결 상태 테스트</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="status-bar">
+      <span id="status-bar-text">Starting…</span>
+    </footer>
+
+    <script src="./index.js"></script>
+  </body>
+</html>

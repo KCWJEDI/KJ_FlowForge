@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "keys": [
+    {
+      "id": "kcwjedi-main",
+      "hash": "<여기에 SHA-256 해시를 넣으세요>",
+      "owner": "KCWJEDI",
+      "expiresAt": "2027-12-31"
+    }
+  ],
+  "revoked": []
+}

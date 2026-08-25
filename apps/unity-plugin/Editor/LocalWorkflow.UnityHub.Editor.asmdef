@@ -1,0 +1,16 @@
+{
+  "name": "LocalWorkflow.UnityHub.Editor",
+  "rootNamespace": "LocalWorkflow.UnityHub",
+  "references": [],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

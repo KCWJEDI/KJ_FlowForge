@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "opencodex": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "OpenCodex",
+      "options": {
+        "baseURL": "http://127.0.0.1:10100/v1",
+        "apiKey": "{env:OPENCODEX_OPENCODE_API_KEY}"
+      },
+      "models": {
+        "opencode-free/deepseek-v4-flash-free": {
+          "name": "deepseek-v4-flash-free (opencode-free)"
+        }
+      }
+    }
+  }
+}

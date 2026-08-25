@@ -1,0 +1,15 @@
+{
+  "name": "com.localworkflow.unity-hub",
+  "version": "0.1.0",
+  "displayName": "Local Workflow Hub",
+  "description": "Editor-only TCP bridge between Unity and the Local Unity Workflow Hub.",
+  "unity": "2021.3",
+  "keywords": [
+    "editor",
+    "automation",
+    "tcp"
+  ],
+  "author": {
+    "name": "Local Workflow Hub"
+  }
+}
