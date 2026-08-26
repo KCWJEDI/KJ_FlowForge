@@ -1043,7 +1043,7 @@ async function saveNotionSettings(): Promise<void> {
   $.settingsNotionMessage.textContent = "저장 중...";
   const payload = notionDatabaseDrafts()
     .filter((draft) => draft.path.trim().length > 0)
-    .map((draft) => ({
+    .map((draft, index) => ({
       label: draft.label || "저장소",
       username: draft.username?.trim() ?? "",
       defaultBranch: draft.defaultBranch?.trim() ?? "",
@@ -1053,7 +1053,7 @@ async function saveNotionSettings(): Promise<void> {
       discordMinCommits: draft.discordMinCommits ?? 0,
       discordBranches: draft.discordBranches ?? [],
       project: draft.project?.trim() || undefined,
-      notionDatabaseId: draft.notionDatabaseId?.trim() || undefined,
+      notionDatabaseId: (state.notionRepositories[index]?.notionDatabaseId ?? draft.notionDatabaseId)?.trim() || undefined,
     }));
   try {
     const result = await api.saveSettings({ HUB_GIT_REPOSITORIES: JSON.stringify(payload) });
@@ -1074,6 +1074,21 @@ function normalizeNotionIdInput(value: string): string {
 
 function renderSettingsNotion(): void {
   const repositories = notionDatabaseDrafts();
+  state.notionRepositories = repositories.map((item, index) => {
+    const previous = state.notionRepositories[index];
+    return {
+      label: item.label ?? "",
+      username: item.username ?? "",
+      defaultBranch: item.defaultBranch ?? "",
+      path: item.path ?? "",
+      url: item.url ?? "",
+      branches: item.branches ?? [],
+      discordMinCommits: item.discordMinCommits ?? 0,
+      discordBranches: item.discordBranches ?? [],
+      project: item.project ?? "",
+      notionDatabaseId: previous?.notionDatabaseId ?? item.notionDatabaseId ?? "",
+    };
+  });
   $.settingsNotionRepositories.innerHTML = "";
   if (repositories.length === 0) {
     const empty = document.createElement("p");
@@ -1083,12 +1098,12 @@ function renderSettingsNotion(): void {
     return;
   }
   for (let index = 0; index < repositories.length; index += 1) {
-    $.settingsNotionRepositories.appendChild(buildSettingsNotionCard(repositories[index]!, index));
+    $.settingsNotionRepositories.appendChild(buildSettingsNotionCard(state.notionRepositories[index]!, index));
   }
 }
 
 async function runNotionDatabaseTest(index: number): Promise<void> {
-  const item = state.dashboard?.config.repositories[index];
+  const item = state.notionRepositories[index];
   if (!item || !item.notionDatabaseId?.trim()) return;
   const dbId = normalizeNotionIdInput(item.notionDatabaseId);
   item.notionDatabaseId = dbId;
@@ -1136,11 +1151,11 @@ function buildSettingsNotionCard(repository: GitRepositorySetting, index: number
   databaseInput.value = repository.notionDatabaseId ?? "";
   let testTimer = undefined as ReturnType<typeof setTimeout> | undefined;
   databaseInput.addEventListener("input", () => {
-    const updated = state.dashboard?.config.repositories;
-    if (!updated) return;
-    updated[index]!.notionDatabaseId = databaseInput.value.trim();
+    const draft = state.notionRepositories[index];
+    if (!draft) return;
+    draft.notionDatabaseId = databaseInput.value.trim();
     if (testTimer) clearTimeout(testTimer);
-    if (updated[index]!.notionDatabaseId) {
+    if (draft.notionDatabaseId) {
       testTimer = setTimeout(() => void runNotionDatabaseTest(index), 700);
     }
   });
@@ -1162,7 +1177,7 @@ function buildSettingsNotionCard(repository: GitRepositorySetting, index: number
     else if (testState.state === "error") message.className = "error-text";
   }
   const runTest = async (): Promise<void> => {
-    const item = state.dashboard?.config.repositories[index];
+    const item = state.notionRepositories[index];
     if (!item || !item.notionDatabaseId?.trim()) {
       message.textContent = "Database ID를 먼저 입력하세요.";
       return;
@@ -1257,7 +1272,10 @@ function bindEvents(): void {
   $.mainTabSettings.addEventListener("click", () => switchMainPanel("settings"));
   $.settingsTabEnv.addEventListener("click", () => switchSettingsPanel("env"));
   $.settingsTabGit.addEventListener("click", () => switchSettingsPanel("git"));
-  $.settingsTabNotion.addEventListener("click", () => switchSettingsPanel("notion"));
+  $.settingsTabNotion.addEventListener("click", () => {
+    switchSettingsPanel("notion");
+    renderSettingsNotion();
+  });
   $.settingsTabStatus.addEventListener("click", () => switchSettingsPanel("status"));
   $.settingsTest.addEventListener("click", () => void performTestIntegrations());
   $.settingsTestStatus.addEventListener("click", () => void performTestIntegrations());
