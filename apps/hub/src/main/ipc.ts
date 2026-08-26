@@ -19,8 +19,10 @@ const licenseSchema = z.object({ key: z.string().min(8).max(256) });
 
 async function startHubAfterActivation(): Promise<void> {
   const mainModule = await import("./index.js");
-  await mainModule.startHub();
+  await mainModule.startHub(lastActivatedRole);
 }
+
+let lastActivatedRole: "admin" | "user" = "user";
 
 export function registerLicenseIpc(getLicenseService?: () => LicenseService | null): void {
   ipcMain.handle("hub:get-license-status", () => {
@@ -29,7 +31,14 @@ export function registerLicenseIpc(getLicenseService?: () => LicenseService | nu
     const stored = service.peek();
     const status = service.getStatus();
     if (!status.activated) return { activated: false, reason: status.reason };
-    return { activated: true, keyId: stored?.keyId, owner: stored?.owner, expiresAt: stored?.expiresAt, reason: undefined };
+    return {
+      activated: true,
+      keyId: stored?.keyId,
+      owner: stored?.owner,
+      role: stored?.role ?? "user",
+      expiresAt: stored?.expiresAt,
+      reason: undefined,
+    };
   });
   ipcMain.handle("hub:activate-license", async (_event, raw: unknown) => {
     const input = licenseSchema.parse(raw);
@@ -37,8 +46,9 @@ export function registerLicenseIpc(getLicenseService?: () => LicenseService | nu
     if (!service) throw new Error("License service unavailable");
     const result = await service.check(input.key);
     if (result.status === "ok") {
+      lastActivatedRole = result.role;
       await startHubAfterActivation();
-      return { activated: true, keyId: result.keyId, owner: result.owner };
+      return { activated: true, keyId: result.keyId, owner: result.owner, role: result.role };
     }
     if (result.status === "offline") return { activated: false, reason: "grace-offline" };
     if (result.status === "blocked") return { activated: false, reason: "blocked" };
@@ -74,10 +84,6 @@ export function registerIpc(
   });
   ipcMain.handle("hub:get-daily-automation", () => runtime.getDailyAutomation());
   ipcMain.handle("hub:run-daily-automation", () => runtime.runDailyAutomation());
-  ipcMain.handle("hub:preview-daily-report", () => runtime.previewDailyReport());
-  ipcMain.handle("hub:publish-pending-daily-report", () => runtime.publishPendingDailyReport());
-  ipcMain.handle("hub:discard-pending-daily-report", () => runtime.discardPendingDailyReport());
-  ipcMain.handle("hub:send-pending-to-discord", () => runtime.sendPendingReportToDiscord());
   ipcMain.handle("hub:choose-git-repository", async () => {
     const window = getWindow();
     const options = {

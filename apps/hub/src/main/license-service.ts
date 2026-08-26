@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { LicenseRole } from "../shared/ipc";
 
 const DEFAULT_MANIFEST_URL =
   "https://raw.githubusercontent.com/KCWJEDI/KJ_FlowForge_Config/main/licenses.json";
@@ -12,6 +13,7 @@ interface ManifestEntry {
   key?: string;
   hash?: string;
   owner?: string;
+  role?: string;
   expiresAt?: string;
 }
 
@@ -25,17 +27,22 @@ export interface StoredLicense {
   key: string;
   keyId: string;
   owner?: string;
+  role: LicenseRole;
   expiresAt?: string;
   lastVerifiedAt: string;
 }
 
 export type LicenseCheckResult =
-  | { status: "ok"; keyId: string; owner?: string }
+  | { status: "ok"; keyId: string; owner?: string; role: LicenseRole }
   | { status: "offline" }
   | { status: "blocked" }
   | { status: "invalid" }
   | { status: "expired" }
   | { status: "revoked" };
+
+function normalizeRole(value: unknown): LicenseRole {
+  return value === "admin" ? "admin" : "user";
+}
 
 export class LicenseService {
   private stored: StoredLicense | null = null;
@@ -63,6 +70,7 @@ export class LicenseService {
           key: parsed.key.trim(),
           keyId: parsed.keyId,
           owner: parsed.owner,
+          role: normalizeRole(parsed.role),
           expiresAt: parsed.expiresAt,
           lastVerifiedAt:
             typeof parsed.lastVerifiedAt === "string" ? parsed.lastVerifiedAt : new Date(0).toISOString(),
@@ -81,15 +89,20 @@ export class LicenseService {
     return { activated: false, reason: "grace-offline" };
   }
 
-  public async verifyOnStartup(): Promise<{ activated: boolean; reason: "missing" | "grace-offline" | "invalid" | "blocked" | undefined }> {
+  public async verifyOnStartup(): Promise<{
+    activated: boolean;
+    reason: "missing" | "grace-offline" | "invalid" | "blocked" | undefined;
+    role?: LicenseRole;
+  }> {
     const stored = await this.loadStored();
     if (!stored) return { activated: false, reason: "missing" };
     const result = await this.check(stored.key);
-    if (result.status === "ok") return { activated: true, reason: undefined };
+    if (result.status === "ok") return { activated: true, reason: undefined, role: result.role };
     if (result.status === "blocked") return { activated: false, reason: "blocked" };
     if (result.status === "offline") {
       const status = this.getStatus();
-      return { activated: status.activated, reason: status.activated ? undefined : "grace-offline" };
+      if (!status.activated) return { activated: false, reason: "grace-offline" };
+      return { activated: true, reason: undefined, role: this.stored?.role ?? "user" };
     }
     await this.clear();
     return { activated: false, reason: "invalid" };
@@ -118,11 +131,12 @@ export class LicenseService {
       key,
       keyId: entry.id,
       owner: entry.owner,
+      role: normalizeRole(entry.role),
       expiresAt: entry.expiresAt,
       lastVerifiedAt: new Date().toISOString(),
     };
     await fs.writeFile(this.licenseFile, JSON.stringify(this.stored, null, 2), "utf8");
-    return { status: "ok", keyId: entry.id, owner: entry.owner };
+    return { status: "ok", keyId: entry.id, owner: entry.owner, role: this.stored.role };
   }
 
   public async clear(): Promise<void> {

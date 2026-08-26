@@ -57,7 +57,7 @@
         </div>
       </section>
 
-      <section class="grid automation-grid">
+    <section id="automation-section" class="grid automation-grid">
         <div class="card automation-card">
           <div class="card-head">
             <h2>08:00 Git 변경 분석 / Notion 일일작업</h2>
@@ -74,16 +74,8 @@
             </p>
             <div id="automation-next" class="muted"></div>
             <div id="automation-last-run" class="automation-result"></div>
-            <div id="automation-pending-report" class="pending-report" hidden>
-              <h3>일일작업 미리보기 · <span id="pending-report-date"></span></h3>
-              <div id="pending-report-body" class="pending-report-body"></div>
-            </div>
             <div class="row">
               <button id="automation-save" class="ghost" type="button">설정 저장</button>
-              <button id="automation-preview" class="ghost" type="button">미리보기</button>
-              <button id="automation-publish" class="primary" type="button" hidden>Notion 등록</button>
-              <button id="automation-discord" class="ghost" type="button" hidden>Discord 전송</button>
-              <button id="automation-discard" class="ghost danger" type="button" hidden>취소</button>
               <button id="automation-run" class="primary" type="button">지금 실행</button>
               <span id="automation-message-text" class="error-text" role="alert"></span>
             </div>

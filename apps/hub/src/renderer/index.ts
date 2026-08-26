@@ -33,6 +33,7 @@ const $ = {
   gitPush: required<HTMLButtonElement>(document.getElementById("git-push"), "git-push"),
   gitError: required<HTMLElement>(document.getElementById("git-error"), "git-error"),
   statusBar: required<HTMLElement>(document.getElementById("status-bar-text"), "status-bar-text"),
+  automationSection: required<HTMLElement>(document.getElementById("automation-section"), "automation-section"),
   mainTabDashboard: required<HTMLButtonElement>(document.getElementById("tab-dashboard"), "tab-dashboard"),
   mainTabSettings: required<HTMLButtonElement>(document.getElementById("tab-settings"), "tab-settings"),
   panelDashboard: required<HTMLElement>(document.getElementById("panel-dashboard"), "panel-dashboard"),
@@ -66,14 +67,7 @@ const $ = {
   automationNext: required<HTMLElement>(document.getElementById("automation-next"), "automation-next"),
   automationLastRun: required<HTMLElement>(document.getElementById("automation-last-run"), "automation-last-run"),
   automationMessageText: required<HTMLElement>(document.getElementById("automation-message-text"), "automation-message-text"),
-  automationPreview: required<HTMLButtonElement>(document.getElementById("automation-preview"), "automation-preview"),
-  automationPublish: required<HTMLButtonElement>(document.getElementById("automation-publish"), "automation-publish"),
-  automationDiscord: required<HTMLButtonElement>(document.getElementById("automation-discord"), "automation-discord"),
-  automationDiscard: required<HTMLButtonElement>(document.getElementById("automation-discard"), "automation-discard"),
-  automationPendingReport: required<HTMLElement>(document.getElementById("automation-pending-report"), "automation-pending-report"),
-  pendingReportDate: required<HTMLElement>(document.getElementById("pending-report-date"), "pending-report-date"),
-  pendingReportBody: required<HTMLElement>(document.getElementById("pending-report-body"), "pending-report-body"),
-};
+}; 
 
 const state: {
   dashboard: DashboardState | null;
@@ -368,88 +362,7 @@ function renderDailyAutomation(view: DailyAutomationView): void {
 
 function updateAutomationButtons(view: DailyAutomationView): void {
   const hasSelectedBranch = view.repositories.some((repo) => repo.selectedBranches.length > 0 && repo.path);
-  const hasPending = Boolean(view.pendingReport);
   $.automationRun.disabled = state.automationBusy || view.running || !hasSelectedBranch;
-  $.automationPreview.disabled = state.automationBusy || view.running || !hasSelectedBranch;
-  $.automationPublish.disabled = state.automationBusy || view.running || !hasPending;
-  $.automationDiscord.disabled = state.automationBusy || view.running || !hasPending;
-  $.automationDiscard.disabled = state.automationBusy || view.running || !hasPending;
-  $.automationPublish.hidden = !hasPending;
-  $.automationDiscord.hidden = !hasPending;
-  $.automationDiscard.hidden = !hasPending;
-  $.automationPendingReport.hidden = !hasPending;
-}
-
-async function runDailyAutomationPreview(): Promise<void> {
-  if (state.automationBusy) return;
-  state.automationBusy = true;
-  $.automationMessageText.textContent = "변경사항을 분석 중입니다…";
-  if (state.dashboard) renderDailyAutomation(state.dashboard.dailyAutomation);
-  try {
-    const run = await window.hub.previewDailyReport();
-    $.automationMessageText.textContent = run.status === "succeeded"
-      ? "미리보기가 준비되었습니다. Notion 등록 또는 Discord 전송을 눌러주세요."
-      : `미리보기 결과: ${run.status}`;
-    await refreshState();
-  } catch (error) {
-    $.automationMessageText.textContent = `미리보기 실패: ${error instanceof Error ? error.message : String(error)}`;
-  } finally {
-    state.automationBusy = false;
-    if (state.dashboard) renderDailyAutomation(state.dashboard.dailyAutomation);
-  }
-}
-
-async function publishPendingDailyReport(): Promise<void> {
-  if (state.automationBusy) return;
-  state.automationBusy = true;
-  $.automationMessageText.textContent = "Notion에 등록 중입니다…";
-  if (state.dashboard) renderDailyAutomation(state.dashboard.dailyAutomation);
-  try {
-    const run = await window.hub.publishPendingDailyReport();
-    $.automationMessageText.textContent = run.status === "succeeded"
-      ? "Notion 일일작업에 등록되었습니다."
-      : `등록 결과: ${run.status}`;
-    await refreshState();
-  } catch (error) {
-    $.automationMessageText.textContent = `등록 실패: ${error instanceof Error ? error.message : String(error)}`;
-  } finally {
-    state.automationBusy = false;
-    if (state.dashboard) renderDailyAutomation(state.dashboard.dailyAutomation);
-  }
-}
-
-async function sendPendingToDiscord(): Promise<void> {
-  if (state.automationBusy) return;
-  state.automationBusy = true;
-  $.automationMessageText.textContent = "Discord로 전송 중입니다…";
-  if (state.dashboard) renderDailyAutomation(state.dashboard.dailyAutomation);
-  try {
-    await window.hub.sendPendingReportToDiscord();
-    $.automationMessageText.textContent = "Discord로 전송되었습니다.";
-    await refreshState();
-  } catch (error) {
-    $.automationMessageText.textContent = `전송 실패: ${error instanceof Error ? error.message : String(error)}`;
-  } finally {
-    state.automationBusy = false;
-    if (state.dashboard) renderDailyAutomation(state.dashboard.dailyAutomation);
-  }
-}
-
-async function discardPendingDailyReport(): Promise<void> {
-  if (state.automationBusy) return;
-  state.automationBusy = true;
-  $.automationMessageText.textContent = "미리보기를 취소하는 중입니다…";
-  if (state.dashboard) renderDailyAutomation(state.dashboard.dailyAutomation);
-  try {
-    await window.hub.discardPendingDailyReport();
-    $.automationMessageText.textContent = "미리보기가 취소되었습니다.";
-    await refreshState();
-  } catch (error) {
-    $.automationMessageText.textContent = `취소 실패: ${error instanceof Error ? error.message : String(error)}`;
-  } finally {
-    state.automationBusy = false;
-    if (state.dashboard) renderDailyAutomation(state.dashboard.dailyAutomation);
-  }
 }
 
 async function saveDailyAutomation(): Promise<void> {
@@ -519,6 +432,8 @@ async function refreshState(): Promise<void> {
 function renderDashboard(dashboard: DashboardState): void {
   state.dashboard = dashboard;
   renderHeader(dashboard);
+  // 08:00 전체 브랜치 자동화는 관리자 전용 카드입니다.
+  $.automationSection.hidden = dashboard.role !== "admin";
   renderGitRepositoryOptions();
   renderDailyAutomation(dashboard.dailyAutomation);
 }
@@ -1169,10 +1084,6 @@ function bindEvents(): void {
   });
   $.settingsRepositoriesSave.addEventListener("click", () => void saveRepositories());
   $.automationSave.addEventListener("click", () => void saveDailyAutomation());
-  $.automationPreview.addEventListener("click", () => void runDailyAutomationPreview());
-  $.automationPublish.addEventListener("click", () => void publishPendingDailyReport());
-  $.automationDiscord.addEventListener("click", () => void sendPendingToDiscord());
-  $.automationDiscard.addEventListener("click", () => void discardPendingDailyReport());
   $.automationRun.addEventListener("click", () => void runDailyAutomationNow());
 }
 

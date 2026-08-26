@@ -235,55 +235,6 @@ describe("daily automation reporting", () => {
     await automation.stop();
   });
 
-  it("replays a persisted pending report before capturing newer branch heads", async () => {
-    directory = await mkdtemp(path.join(tmpdir(), "hub-daily-run-"));
-    const config = testConfig(directory);
-    const stateKey = "remote:github.com/example/repository|origin|main";
-    const commit = {
-      hash: "b".repeat(40),
-      author: "KJ",
-      occurredAt: "2026-08-13T08:00:00+09:00",
-      subject: "복구 테스트",
-      body: "",
-    };
-    await new DailyAutomationStateStore(directory).write({
-      version: 1,
-      reportedHeads: {},
-      pendingBaselines: { [stateKey]: "old-head" },
-      pendingReport: {
-        date: "2026-08-13",
-        reportKey: "remote:github.com/example/repository|daily|2026-08-13",
-        targetHeads: { [stateKey]: "reported-head" },
-        branches: [{
-          branch: "main",
-          author: "KJ",
-          occurredAt: commit.occurredAt,
-          content: commit.subject,
-          commits: [commit],
-        }],
-      },
-    });
-    const git = fakeGitService([]);
-    const createDailyWorkReport = vi.fn().mockResolvedValue("existing-page");
-    const automation = new DailyAutomation({
-      config,
-      git,
-      notion: { enabled: true, createDailyWorkReport } as unknown as NotionAdapter,
-      onChanged: () => undefined,
-    });
-    await automation.start();
-
-    const run = await automation.run("manual");
-
-    expect(run.status).toBe("succeeded");
-    expect(createDailyWorkReport).toHaveBeenCalledWith(expect.objectContaining({ date: "2026-08-13" }));
-    expect(createDailyWorkReport).toHaveBeenCalledTimes(2);
-    expect(git.captureBranchCommits).toHaveBeenCalled();
-    const state = await new DailyAutomationStateStore(directory).read();
-    expect(state.reportedHeads[stateKey]).toBe("head-2");
-    expect(state.pendingReport).toBeUndefined();
-    await automation.stop();
-  });
 });
 
 function testConfig(dataDirectory: string): HubConfig {

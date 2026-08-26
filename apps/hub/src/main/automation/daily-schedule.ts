@@ -7,19 +7,11 @@ import { GitService, normalizeRemoteIdentity, type GitCommitSummary, type GitRep
 import { NotionAdapter, type DailyWorkReportBranch } from "../integrations/notion-adapter";
 import { DiscordAdapter } from "../integrations/discord-adapter";
 
-interface PendingDailyReport {
-  date: string;
-  reportKey: string;
-  targetHeads: Record<string, string>;
-  branches: DailyWorkReportBranch[];
-}
-
 export interface DailyAutomationStateFile {
   version: 1;
   lastScheduledDate?: string;
   reportedHeads: Record<string, string>;
   pendingBaselines: Record<string, string>;
-  pendingReport?: PendingDailyReport;
   lastRun?: DailyAutomationRunView;
 }
 
@@ -59,7 +51,6 @@ export class DailyAutomationStateStore {
         lastScheduledDate: typeof raw.lastScheduledDate === "string" ? raw.lastScheduledDate : undefined,
         reportedHeads: raw.reportedHeads && typeof raw.reportedHeads === "object" ? raw.reportedHeads : {},
         pendingBaselines: raw.pendingBaselines && typeof raw.pendingBaselines === "object" ? raw.pendingBaselines : {},
-        pendingReport: isPendingDailyReport(raw.pendingReport) ? raw.pendingReport : undefined,
         lastRun: isDailyAutomationRun(raw.lastRun) ? raw.lastRun : undefined,
       };
     } catch (error) {
@@ -96,6 +87,8 @@ interface DailyAutomationOptions {
   git: GitService;
   notion: NotionAdapter;
   discord?: DiscordAdapter;
+  /** 관리자 실행 시 저장소의 모든 로컬 브랜치를 분석합니다. */
+  allBranches?: boolean;
   onChanged: () => void;
 }
 
@@ -129,10 +122,6 @@ export class DailyAutomation {
     await this.activeRun?.catch(() => undefined);
   }
 
-  public preview(): Promise<DailyAutomationRunView> {
-    return this.runWithPreview("manual");
-  }
-
   public reconfigure(): void {
     if (!this.stopped) this.scheduleNext();
     void this.refreshBranches();
@@ -148,41 +137,16 @@ export class DailyAutomation {
         : null,
       lastRun: this.state.lastRun ?? null,
       running: this.activeRun !== null,
-      pendingReport: this.state.pendingReport
-        ? {
-            date: this.state.pendingReport.date,
-            reportKey: this.state.pendingReport.reportKey,
-            branches: this.state.pendingReport.branches.map((branch) => ({
-              repositoryLabel: branch.repositoryLabel,
-              branch: branch.branch,
-              status: "succeeded" as const,
-              phase: "analyzed" as const,
-              attempts: 1,
-              reported: false,
-              commitCount: branch.commits.length,
-              message: branch.commits.length > 0
-                ? `미리보기: 새 커밋 ${branch.commits.length}개`
-                : "미리보기: 새 커밋 없음",
-            })),
-          }
-        : null,
     };
   }
 
   public run(trigger: DailyAutomationRunView["trigger"] = "manual"): Promise<DailyAutomationRunView> {
-    return this.runWithPreview(trigger, false);
-  }
-
-  private runWithPreview(
-    trigger: DailyAutomationRunView["trigger"],
-    previewOnly = false,
-  ): Promise<DailyAutomationRunView> {
     if (this.activeRun) {
       if (trigger === "manual") return Promise.reject(new Error("Daily automation is already running"));
       this.pendingScheduledRun = true;
       return this.activeRun;
     }
-    this.activeRun = this.execute(trigger, previewOnly).finally(() => {
+    this.activeRun = this.execute(trigger).finally(() => {
       this.activeRun = null;
       this.options.onChanged();
       if (this.pendingScheduledRun && !this.stopped) {
@@ -194,7 +158,7 @@ export class DailyAutomation {
     return this.activeRun;
   }
 
-  private async execute(trigger: DailyAutomationRunView["trigger"], previewOnly = false): Promise<DailyAutomationRunView> {
+  private async execute(trigger: DailyAutomationRunView["trigger"]): Promise<DailyAutomationRunView> {
     const run: DailyAutomationRunView = {
       id: randomUUID(),
       startedAt: new Date().toISOString(),
@@ -212,16 +176,16 @@ export class DailyAutomation {
       if (repositories.length === 0) throw new Error("모니터링할 Git 저장소가 설정되지 않았습니다.");
       if (!this.options.notion.enabled) throw new Error("Notion integration is not configured");
 
-      if (this.state.pendingReport) {
-        await this.publishPendingReport(run);
-      }
-
       await this.refreshBranches();
       const captures: CapturedBranch[] = [];
       let anySelected = false;
       for (const repositorySetting of repositories) {
         const repository = repositorySetting.path;
-        const branches = repositorySetting.branches.filter(Boolean);
+        const selectedBranches = repositorySetting.branches.filter(Boolean);
+        // 관리자 자동화는 저장소의 모든 로컬 브랜치를 분석합니다.
+        const branches = this.options.allBranches === true
+          ? [...new Set([...selectedBranches, ...(await this.options.git.listBranches(repository))])]
+          : selectedBranches;
         await this.options.git.validateRepository(repository);
         if (branches.length > 0) anySelected = true;
         const identity = await this.options.git.getRepositoryIdentity(repository);
@@ -300,31 +264,8 @@ export class DailyAutomation {
         const date = localDateKey();
         const allKeys = captures.map((capture) => capture.stateKey).sort();
         const reportKey = `${allKeys.join("|")}|daily|${date}`;
-        this.state.pendingReport = {
-          date,
-          reportKey,
-          targetHeads: Object.fromEntries(captures.map((capture) => [capture.stateKey, capture.currentHead])),
-          branches: captures.map(buildDailyWorkBranch),
-        };
-        await this.store.write(this.state);
-        if (previewOnly) {
-          run.status = "succeeded";
-          run.branches = this.state.pendingReport.branches.map((branch) => ({
-            repositoryLabel: branch.repositoryLabel,
-            branch: branch.branch,
-            status: "succeeded" as const,
-            phase: "analyzed" as const,
-            attempts: 1,
-            reported: false,
-            commitCount: branch.commits.length,
-            message: branch.commits.length > 0
-              ? `미리보기: 새 커밋 ${branch.commits.length}개가 있습니다.`
-              : "미리보기: 새 커밋이 없습니다.",
-          }));
-        } else {
-          await this.publishPendingReport(run);
-          run.status = "succeeded";
-        }
+        await this.publishReport(run, date, reportKey, captures);
+        run.status = "succeeded";
       }
     } catch (error) {
       run.status = "failed";
@@ -334,64 +275,45 @@ export class DailyAutomation {
     return this.finishRun(run, trigger);
   }
 
-  public async publishPendingReport(run: DailyAutomationRunView): Promise<void> {
-    const pending = this.state.pendingReport;
-    if (!pending) return;
-    // Do not immediately retry an uncertain page creation. A later run reuses the
-    // same date/report key and lets the adapter find and complete that page.
-    const reportPageId = await this.options.notion.createDailyWorkReport({
-      date: pending.date,
-      reportKey: pending.reportKey,
-      branches: pending.branches,
-    });
+  private async publishReport(
+    run: DailyAutomationRunView,
+    date: string,
+    reportKey: string,
+    captures: CapturedBranch[],
+  ): Promise<void> {
+    // Notion 등록이 실패하면 HEAD를 갱신하지 않습니다. 같은 날짜/리포트 키로
+    // 다음 실행이 페이지를 찾아 이어서 완성하거나 새로 생성합니다.
+    const branches = captures.map(buildDailyWorkBranch);
+    const reportPageId = await this.options.notion.createDailyWorkReport({ date, reportKey, branches });
     if (this.options.discord?.enabled) {
       try {
-        const branches = filterDiscordBranches(pending.branches, this.options.config.repositories);
-        if (branches.length > 0) {
-          await this.options.discord.sendMessage(buildDiscordDailySummary(pending.date, branches, reportPageId));
+        const discordBranches = filterDiscordBranches(branches, this.options.config.repositories);
+        if (discordBranches.length > 0) {
+          await this.options.discord.sendMessage(buildDiscordDailySummary(date, discordBranches, reportPageId));
         }
       } catch (discordError) {
         run.error = `Discord 전송 실패: ${errorMessage(discordError)}`;
       }
     }
-    for (const [stateKey, head] of Object.entries(pending.targetHeads)) {
-      this.state.reportedHeads[stateKey] = head;
-      delete this.state.pendingBaselines[stateKey];
+    for (const capture of captures) {
+      this.state.reportedHeads[capture.stateKey] = capture.currentHead;
+      delete this.state.pendingBaselines[capture.stateKey];
     }
-    this.state.pendingReport = undefined;
-    run.branches = pending.branches.map((branch) => {
-      const commitCount = branch.commits.length;
-      return {
-        repositoryLabel: branch.repositoryLabel,
-        branch: branch.branch,
-        status: "succeeded" as const,
-        phase: "reported" as const,
-        attempts: 1,
-        toHead: Object.entries(pending.targetHeads).find(([key]) => key.endsWith(`|origin|${branch.branch}`))?.[1],
-        reportPageId,
-        reported: true,
-        commitCount,
-        message: commitCount > 0
-          ? `새 커밋 ${commitCount}개를 Notion 일일작업에 등록했습니다.`
-          : "새 커밋이 없어 날짜만 Notion 일일작업에 반영했습니다.",
-      };
-    });
+    run.branches = captures.map((capture) => ({
+      repositoryLabel: capture.repositoryLabel,
+      branch: capture.branch,
+      status: "succeeded" as const,
+      phase: "reported" as const,
+      attempts: 1,
+      toHead: capture.currentHead,
+      reportPageId,
+      reported: true,
+      commitCount: capture.commits.length,
+      message: capture.commits.length > 0
+        ? `새 커밋 ${capture.commits.length}개를 Notion 일일작업에 등록했습니다.`
+        : "새 커밋이 없어 날짜만 Notion 일일작업에 기록했습니다.",
+    }));
     await this.store.write(this.state);
-  }
-
-  public async sendPendingToDiscord(): Promise<void> {
-    const pending = this.state.pendingReport;
-    if (!pending) throw new Error("미리보기 중인 보고서가 없습니다.");
-    if (!this.options.discord?.enabled) throw new Error("Discord 연결이 설정되지 않았습니다.");
-    const branches = filterDiscordBranches(pending.branches, this.options.config.repositories);
-    if (branches.length === 0) throw new Error("현재 보고서는 Discord 알림 조건을 만족하지 않습니다.");
-    await this.options.discord.sendMessage(buildDiscordDailySummary(pending.date, branches));
-  }
-
-  public async discardPendingReport(): Promise<void> {
-    this.state.pendingReport = undefined;
-    await this.store.write(this.state);
-    this.options.onChanged();
   }
 
   private async finishRun(
@@ -450,12 +372,12 @@ export class DailyAutomation {
     const repositories = this.options.config.repositories;
     const views: DailyAutomationView["repositories"] = [];
     for (const repositorySetting of repositories) {
-      let path = repositorySetting.path ?? null;
+      let repoPath = repositorySetting.path ?? null;
       let repositoryError: string | null = null;
       let availableBranches: string[] = [];
       try {
         const validated = await this.options.git.validateRepository(repositorySetting.path);
-        path = validated;
+        repoPath = validated;
         availableBranches = await this.options.git.listBranches(validated);
         repositoryError = availableBranches.length === 0 ? "선택한 로컬 Git 저장소에 브랜치가 없습니다." : null;
       } catch (error) {
@@ -466,7 +388,7 @@ export class DailyAutomation {
         label: repositorySetting.label,
         username: repositorySetting.username ?? "",
         defaultBranch: repositorySetting.defaultBranch ?? "",
-        path,
+        path: repoPath,
         url: repositorySetting.url ?? "",
         repositoryError,
         selectedBranches: [...repositorySetting.branches],
@@ -524,32 +446,23 @@ function isDailyAutomationRun(value: unknown): value is DailyAutomationRunView {
   return typeof candidate.id === "string" && typeof candidate.startedAt === "string" && Array.isArray(candidate.branches);
 }
 
-function isPendingDailyReport(value: unknown): value is PendingDailyReport {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<PendingDailyReport>;
-  return typeof candidate.date === "string"
-    && typeof candidate.reportKey === "string"
-    && Boolean(candidate.targetHeads && typeof candidate.targetHeads === "object")
-    && Array.isArray(candidate.branches);
-}
-
 function buildDiscordDailySummary(
   date: string,
   branches: DailyWorkReportBranch[],
   reportPageId?: string,
 ): string {
   const lines: string[] = [];
-  lines.push(`📋 일일작업 분석 · ${date}`);
+  lines.push(`📋 일일작업 보고 · ${date}`);
   if (branches.length === 0) {
-    lines.push("분석된 브랜치가 없습니다.");
+    lines.push("보고할 브랜치가 없습니다.");
   }
   let totalCommits = 0;
   for (const branch of branches) {
     totalCommits += branch.commits.length;
     const heading = branch.repositoryLabel
-      ? `[분야: ${branch.repositoryLabel}] 브랜치: ${branch.branch}`
-      : `브랜치: ${branch.branch}`;
-    lines.push("", `**${heading}**`, `담당자: ${branch.author || "Unknown"}`);
+      ? `[분야: ${branch.repositoryLabel}] 브랜치 ${branch.branch}`
+      : `브랜치 ${branch.branch}`;
+    lines.push("", `**${heading}**`, `담당: ${branch.author || "Unknown"}`);
     if (branch.commits.length === 0) {
       lines.push("새 커밋 없음");
       continue;

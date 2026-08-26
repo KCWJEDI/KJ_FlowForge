@@ -1,3 +1,5 @@
+export type LicenseRole = "admin" | "user";
+
 export interface PublicConfig {
   httpPort: number;
   tcpPort: number;
@@ -48,12 +50,6 @@ export interface DailyAutomationRunView {
   error?: string;
 }
 
-export interface PendingDailyReportView {
-  date: string;
-  reportKey: string;
-  branches: DailyAutomationBranchResult[];
-}
-
 export interface DailyAutomationView {
   enabled: boolean;
   repositories: Array<{
@@ -71,7 +67,6 @@ export interface DailyAutomationView {
   nextRunAt: string | null;
   lastRun: DailyAutomationRunView | null;
   running: boolean;
-  pendingReport: PendingDailyReportView | null;
 }
 
 export interface GitChangeSummary {
@@ -128,12 +123,14 @@ export interface LicenseStatus {
   keyId?: string;
   owner?: string;
   expiresAt?: string;
+  role?: LicenseRole;
   reason?: "missing" | "grace-offline" | "invalid" | "blocked" | undefined;
 }
 
 export interface DashboardState {
   startedAt: string;
   config: PublicConfig;
+  role: LicenseRole;
   recentEvents: Array<{ name: string; timestamp: string; summary: string }>;
   dailyAutomation: DailyAutomationView;
 }
@@ -149,10 +146,6 @@ export interface HubApi {
   runDailyAutomation(): Promise<DailyAutomationRunView>;
   chooseGitRepository(): Promise<string | null>;
   listGitRemoteBranches(url: string): Promise<string[]>;
-  previewDailyReport(): Promise<DailyAutomationRunView>;
-  publishPendingDailyReport(): Promise<DailyAutomationRunView>;
-  discardPendingDailyReport(): Promise<void>;
-  sendPendingReportToDiscord(): Promise<DailyAutomationRunView>;
   getSettings(): Promise<SettingsView>;
   saveSettings(values: Record<string, string>): Promise<SettingsSaveResult>;
   testIntegrations(): Promise<IntegrationConnectionStatus[]>;

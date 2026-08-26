@@ -6,6 +6,7 @@ import { HubRuntime } from "./hub-runtime";
 import { LocalHttpApi } from "./http-api";
 import { registerIpc, registerLicenseIpc } from "./ipc";
 import { LicenseService } from "./license-service";
+import type { LicenseRole } from "../shared/ipc";
 
 let licenseService: LicenseService | null = null;
 
@@ -33,7 +34,7 @@ async function bootstrap(): Promise<void> {
   if (!singleInstanceLockAcquired) {
     const gotLock = app.requestSingleInstanceLock();
     if (!gotLock) {
-      // 이미 실행 중인 인스턴스가 있으면 새 프로세스는 조용히 종료한다.
+      // 이미 다른 인스턴스가 실행 중이면 이 프로세스는 조용히 종료합니다.
       app.exit(0);
       return;
     }
@@ -59,14 +60,14 @@ async function bootstrap(): Promise<void> {
     await showLicenseWindow(gate.reason);
     return;
   }
-  await startHub();
+  await startHub(gate.role);
 }
 
-export async function startHub(): Promise<void> {
+export async function startHub(role?: LicenseRole): Promise<void> {
   const userData = app.getPath("userData");
   const envFile = path.join(userData, ".env");
   const config = await loadConfig(path.join(userData, "runtime"), envFile);
-  runtime = new HubRuntime(config);
+  runtime = new HubRuntime(config, role ?? "user");
   httpApi = new LocalHttpApi(runtime);
   await runtime.start();
   await httpApi.start();
@@ -107,10 +108,10 @@ app.whenReady().then(bootstrap).catch((error) => {
 async function showLicenseWindow(reason: "missing" | "grace-offline" | "invalid" | "blocked" | undefined): Promise<void> {
   const { dialog } = await import("electron");
   const message = reason === "grace-offline"
-    ? "라이선스 확인을 위해 인터넷에 연결해 주세요."
+    ? "라이선스 확인을 위해 네트워크에 연결해주세요."
     : reason === "invalid"
-      ? "저장된 라이선스가 더 이상 유효하지 않습니다. 유효한 키를 입력해 주세요."
-      : "유효한 키를 입력해 주세요.";
+      ? "저장된 라이선스가 더 이상 유효하지 않습니다. 유효한 키를 입력하세요."
+      : "유효한 키를 입력해주세요.";
   mainWindow = new BrowserWindow({
     width: 480,
     height: 320,

@@ -21,3 +21,4 @@ UserSettings/
 .txt
 apps/hub/release/win-unpacked/
 apps/hub/release/builder-debug.yml
+apps/hub/release/*.exe
