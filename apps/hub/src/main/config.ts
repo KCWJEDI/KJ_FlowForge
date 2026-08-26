@@ -89,17 +89,19 @@ function parseRepositories(
       const parsed = JSON.parse(repositoriesRaw) as unknown;
       if (Array.isArray(parsed)) {
         return parsed
-          .filter((item): item is { label?: unknown; username?: unknown; defaultBranch?: unknown; path?: unknown; url?: unknown; branches?: unknown; discordMinCommits?: unknown; discordBranches?: unknown } =>
+          .filter((item): item is { project?: unknown; label?: unknown; username?: unknown; defaultBranch?: unknown; path?: unknown; url?: unknown; branches?: unknown; discordMinCommits?: unknown; discordBranches?: unknown; notionDatabaseId?: unknown } =>
            Boolean(item) && typeof item === "object")
          .map((item) => ({
+           project: typeof item.project === "string" && item.project.trim() ? item.project.trim() : "",
            label: typeof item.label === "string" && item.label.trim() ? item.label.trim() : "저장소",
            username: typeof item.username === "string" ? item.username.trim() : "",
            defaultBranch: typeof item.defaultBranch === "string" ? item.defaultBranch.trim() : "",
            path: typeof item.path === "string" && item.path.trim() ? item.path.trim() : "",
             url: typeof item.url === "string" && item.url.trim() ? item.url.trim() : "",
             branches: Array.isArray(item.branches) ? item.branches.filter((branch): branch is string => typeof branch === "string") : [],
-            discordMinCommits: parseMinCommits(item.discordMinCommits),
-            discordBranches: parseBranchArray(item.discordBranches),
+           discordMinCommits: parseMinCommits(item.discordMinCommits),
+           discordBranches: parseBranchArray(item.discordBranches),
+           notionDatabaseId: typeof item.notionDatabaseId === "string" ? item.notionDatabaseId.trim() : "",
          }))
          .filter((item) => item.path.length > 0);
       }
@@ -109,7 +111,7 @@ function parseRepositories(
   }
   const legacy = legacyRepository?.trim();
   if (legacy) {
-    return [{ label: "기본", username: "", defaultBranch: "", path: legacy, url: "", branches: parseBranchList(legacyBranches) }];
+    return [{ project: "", label: "기본", username: "", defaultBranch: "", path: legacy, url: "", branches: parseBranchList(legacyBranches), notionDatabaseId: "" }];
   }
   return [];
 }

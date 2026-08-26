@@ -16,6 +16,10 @@ const commitSchema = z.object({ repository: z.string().min(1).optional() });
 const pushSchema = z.object({ repository: z.string().min(1).optional() });
 const settingsSchema = z.record(z.string(), z.string().max(16_384));
 const licenseSchema = z.object({ key: z.string().min(8).max(256) });
+const notionDatabaseSchema = z.object({
+  repository: z.string().optional(),
+  databaseId: z.string().max(128),
+});
 
 async function startHubAfterActivation(): Promise<void> {
   const mainModule = await import("./index.js");
@@ -102,6 +106,10 @@ export function registerIpc(
   ipcMain.handle("hub:get-settings", () => runtime.getSettings());
   ipcMain.handle("hub:save-settings", (_event, raw: unknown) => runtime.saveSettings(settingsSchema.parse(raw)));
   ipcMain.handle("hub:test-integrations", () => runtime.testIntegrations());
+  ipcMain.handle("hub:test-notion-database", (_event, raw: unknown) => {
+    const input = notionDatabaseSchema.parse(raw ?? {});
+    return runtime.testNotionDatabase(input);
+  });
   const stateListener = (state: unknown): void => {
     const window = getWindow();
     if (window && !window.isDestroyed()) window.webContents.send("hub:state-changed", state);
@@ -123,6 +131,7 @@ export function registerIpc(
       "hub:get-settings",
       "hub:save-settings",
       "hub:test-integrations",
+      "hub:test-notion-database",
     ]) {
       ipcMain.removeHandler(channel);
     }

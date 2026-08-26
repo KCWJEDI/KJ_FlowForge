@@ -169,6 +169,30 @@ export class HubRuntime extends EventEmitter {
     };
   }
 
+  /** 설정 탭 'Notion 저장소'에서 특정 데이터베이스 ID의 연결을 테스트합니다. */
+  public async testNotionDatabase(args: { repository?: string; databaseId: string }): Promise<{ ok: boolean; message: string }> {
+    const databaseId = (args.databaseId ?? "").trim();
+    if (!databaseId) return { ok: false, message: "데이터베이스 ID를 먼저 입력하세요." };
+    try {
+      const message = await this.notion.testConnection(databaseId);
+      return { ok: true, message };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  private async normalizeNotionDatabaseId(value: string): Promise<string> {
+    const trimmed = value.trim();
+    if (!trimmed) return "";
+    const withoutQuery = trimmed.split("?")[0] ?? trimmed;
+    const match = /([0-9a-fA-F]{32})/.exec(withoutQuery.replace(/-/g, ""));
+    if (match?.[1]) {
+      const hex = match[1].toLowerCase();
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+    }
+    return trimmed;
+  }
+
   public async saveSettings(input: Record<string, string>): Promise<SettingsSaveResult> {
     this.lastRepositoriesWarning = null;
     const entries: Record<string, string> = { ...input };
@@ -189,12 +213,15 @@ export class HubRuntime extends EventEmitter {
           const parsed = JSON.parse(raw) as Array<Partial<{
             label: string; username: string; defaultBranch: string; path: string;
             url: string; branches: string[]; discordMinCommits: number; discordBranches: string[];
+            project: string; notionDatabaseId: string;
           }>>;
           const validated: Array<{
             label: string; username: string; defaultBranch: string; path: string; url: string;
             branches: string[]; discordMinCommits: number; discordBranches: string[];
+            project: string; notionDatabaseId: string;
           }> = [];
           for (const item of parsed) {
+            const project = typeof item?.project === "string" ? item.project.trim() : "";
             const label = typeof item?.label === "string" && item.label.trim() ? item.label.trim() : "저장소";
             const username = typeof item?.username === "string" ? item.username.trim() : "";
             const defaultBranch = typeof item?.defaultBranch === "string" ? item.defaultBranch.trim() : "";
@@ -211,6 +238,7 @@ export class HubRuntime extends EventEmitter {
                 "저장소 검증 지연: " + message;
             }
             validated.push({
+              project,
               label,
               username,
               defaultBranch,
@@ -224,6 +252,10 @@ export class HubRuntime extends EventEmitter {
               discordBranches: Array.isArray(item?.discordBranches)
                 ? item.discordBranches.filter((b): b is string => typeof b === "string")
                 : [],
+              notionDatabaseId:
+                typeof item?.notionDatabaseId === "string"
+                  ? (await this.normalizeNotionDatabaseId(item.notionDatabaseId))
+                  : "",
             });
           }
           updates.HUB_GIT_REPOSITORIES = JSON.stringify(validated);

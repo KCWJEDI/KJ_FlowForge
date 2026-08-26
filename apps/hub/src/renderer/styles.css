@@ -252,6 +252,11 @@ button.primary {
   font-size: 12px;
 }
 
+.success-text {
+  color: var(--ok);
+  font-size: 12px;
+}
+
 .code {
   background: #0b0e1a;
   border: 1px solid var(--border);

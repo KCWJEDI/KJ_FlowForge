@@ -5,6 +5,7 @@ const MAX_PAGE_CHILDREN = 100;
 
 export interface DailyWorkReportBranch {
   repositoryLabel?: string;
+  branchLabel?: string;
   branch: string;
   author: string;
   occurredAt: string;
@@ -15,6 +16,7 @@ export interface DailyWorkReportBranch {
 export class NotionAdapter {
   private client: Client | null;
   private titlePropertyName: string | null | undefined = undefined;
+  private readonly titleCache = new Map<string, string>();
 
   public constructor(private config: { token?: string; databaseId?: string }) {
     this.client = config.token ? new Client({ auth: config.token }) : null;
@@ -28,23 +30,40 @@ export class NotionAdapter {
     this.config = config;
     this.client = config.token ? new Client({ auth: config.token }) : null;
     this.titlePropertyName = undefined;
+    this.titleCache.clear();
   }
 
-  private async resolveTitlePropertyName(): Promise<string> {
-    if (this.titlePropertyName === undefined) {
-      if (!this.client || !this.config.databaseId) throw new Error("Notion integration or database is not configured");
-      const database = await this.client.databases.retrieve({ database_id: this.config.databaseId });
-      const entry = Object.entries(database.properties).find(([, property]) => property.type === "title");
-      this.titlePropertyName = entry ? entry[0] : null;
-    }
-    if (!this.titlePropertyName) throw new Error("Notion database has no title property to create a task");
-    return this.titlePropertyName;
+  /** 저장소별 데이터베이스 ID가 있으면 그것을 우선 사용합니다. */
+  private targetDatabaseId(repositoryDatabaseId?: string): string | undefined {
+    const trimmed = repositoryDatabaseId?.trim();
+    if (trimmed) return trimmed;
+    return this.config.databaseId || undefined;
   }
 
-  public async testConnection(): Promise<string> {
-    if (!this.client || !this.config.databaseId) throw new Error("Notion integration or database is not configured");
-    const database = await this.client.databases.retrieve({ database_id: this.config.databaseId });
-    return `Database ${database.id}`;
+  public get configured(): boolean {
+    return this.client !== null && Boolean(this.config.databaseId);
+  }
+
+  private async resolveTitlePropertyName(repositoryDatabaseId?: string): Promise<string> {
+    const cacheKey = repositoryDatabaseId?.trim() || "__default__";
+    const cached = this.titleCache.get(cacheKey);
+    if (cached !== undefined) return cached;
+    const databaseId = this.targetDatabaseId(repositoryDatabaseId);
+    if (!this.client || !databaseId) throw new Error("Notion integration or database is not configured");
+    const database = await this.client.databases.retrieve({ database_id: databaseId });
+    const entry = Object.entries(database.properties).find(([, property]) => property.type === "title");
+    const resolved = entry ? entry[0] : "";
+    if (!resolved) throw new Error("Notion database has no title property to create a task");
+    this.titleCache.set(cacheKey, resolved);
+    return resolved;
+  }
+
+  public async testConnection(repositoryDatabaseId?: string): Promise<string> {
+    const databaseId = this.targetDatabaseId(repositoryDatabaseId);
+    if (!this.client || !databaseId) throw new Error("Notion integration or database is not configured");
+    const database = await this.client.databases.retrieve({ database_id: databaseId });
+    const titleEntry = Object.entries(database.properties).find(([, property]) => property.type === "title");
+    return `데이터베이스 연결 성공 (${titleEntry?.[0] ?? "제목 없음"})`;
   }
 
   public async createTask(input: {
@@ -52,11 +71,13 @@ export class NotionAdapter {
     status?: string;
     description?: string;
     externalId?: string;
+    repositoryDatabaseId?: string;
   }): Promise<string> {
-    if (!this.client || !this.config.databaseId) throw new Error("Notion integration or database is not configured");
-    const titlePropertyName = await this.resolveTitlePropertyName();
+    const databaseId = this.targetDatabaseId(input.repositoryDatabaseId);
+    if (!this.client || !databaseId) throw new Error("Notion integration or database is not configured");
+    const titlePropertyName = await this.resolveTitlePropertyName(input.repositoryDatabaseId);
     const response = await this.client.pages.create({
-      parent: { database_id: this.config.databaseId },
+      parent: { database_id: databaseId },
       properties: {
         [titlePropertyName]: { title: [{ text: { content: input.title } }] },
       },
@@ -88,12 +109,14 @@ export class NotionAdapter {
     occurredAt: string;
     content: string;
     reportKey?: string;
+    repositoryDatabaseId?: string;
     commits: Array<{ hash: string; author: string; occurredAt: string; subject: string; body?: string }>;
   }): Promise<string> {
-    if (!this.client || !this.config.databaseId) throw new Error("Notion integration or database is not configured");
+    const databaseId = this.targetDatabaseId(input.repositoryDatabaseId);
+    if (!this.client || !databaseId) throw new Error("Notion integration or database is not configured");
 
-    const titlePropertyName = await this.resolveTitlePropertyName();
-    const database = await this.client.databases.retrieve({ database_id: this.config.databaseId });
+    const titlePropertyName = await this.resolveTitlePropertyName(input.repositoryDatabaseId);
+    const database = await this.client.databases.retrieve({ database_id: databaseId });
     const schema = database.properties as Record<string, { type?: string }>;
 
     const reportSuffix = input.reportKey ? input.reportKey.split("|").at(-1)?.slice(0, 8) : undefined;
@@ -158,7 +181,7 @@ export class NotionAdapter {
       blocks.push(paragraphBlock(`보고가 ${MAX_PAGE_CHILDREN}개 블록 제한을 초과해 일부 상세 내용이 생략되었습니다.`));
     }
     const page = await this.client.pages.create({
-      parent: { database_id: this.config.databaseId },
+      parent: { database_id: databaseId },
       properties: properties as never,
       children: blocks as never,
     });
@@ -168,16 +191,19 @@ export class NotionAdapter {
   public async createDailyWorkReport(input: {
     date: string;
     reportKey: string;
+    repositoryDatabaseId?: string;
     branches: DailyWorkReportBranch[];
   }): Promise<string> {
-    if (!this.client || !this.config.databaseId) throw new Error("Notion integration or database is not configured");
+    const databaseId = this.targetDatabaseId(input.repositoryDatabaseId);
+    if (!this.client || !databaseId) throw new Error("Notion integration or database is not configured");
 
-    const titlePropertyName = await this.resolveTitlePropertyName();
-    const database = await this.client.databases.retrieve({ database_id: this.config.databaseId });
+    const titlePropertyName = await this.resolveTitlePropertyName(input.repositoryDatabaseId);
+    const database = await this.client.databases.retrieve({ database_id: databaseId });
     const schema = database.properties as Record<string, { type?: string }>;
     const titleValue = `일일작업 · ${input.date}`;
-    const existing = await this.findExistingDailyReport(titlePropertyName, schema, titleValue, input.reportKey);
+    const existing = await this.findExistingDailyReport(databaseId, titlePropertyName, schema, titleValue, input.reportKey);
     const pageId = existing ?? await this.createDailyReportPage(
+      databaseId,
       titlePropertyName,
       schema,
       titleValue,
@@ -200,6 +226,7 @@ export class NotionAdapter {
   }
 
   private async createDailyReportPage(
+    databaseId: string,
     titlePropertyName: string,
     schema: Record<string, { type?: string }>,
     title: string,
@@ -207,7 +234,7 @@ export class NotionAdapter {
     reportKey: string,
     branches: DailyWorkReportBranch[],
   ): Promise<string> {
-    if (!this.client || !this.config.databaseId) throw new Error("Notion integration or database is not configured");
+    if (!this.client) throw new Error("Notion integration is not configured");
     const properties: Record<string, unknown> = {
       [titlePropertyName]: { title: [{ type: "text", text: { content: title } }] },
     };
@@ -224,7 +251,7 @@ export class NotionAdapter {
     }
 
     const page = await this.client.pages.create({
-      parent: { database_id: this.config.databaseId },
+      parent: { database_id: databaseId },
       properties: properties as never,
       children: [paragraphBlock(`날짜: ${date}`)] as never,
     });
@@ -232,18 +259,19 @@ export class NotionAdapter {
   }
 
   private async findExistingDailyReport(
+    databaseId: string,
     titlePropertyName: string,
     schema: Record<string, { type?: string }>,
     title: string,
     reportKey: string,
   ): Promise<string | null> {
-    if (!this.client || !this.config.databaseId) return null;
+    if (!this.client) return null;
     const reportProperty = findSchemaProperty(schema, ["보고키", "Report Key", "ReportKey"]);
     const filter = reportProperty?.type === "rich_text"
       ? { property: reportProperty.id, rich_text: { equals: reportKey } }
       : { property: titlePropertyName, title: { equals: title } };
     const response = await this.client.databases.query({
-      database_id: this.config.databaseId,
+      database_id: databaseId,
       filter: filter as never,
       page_size: 1,
     });
@@ -318,8 +346,8 @@ function buildDailyReportBlocks(branches: DailyWorkReportBranch[], existingHashe
   for (const branch of branches) {
     const commits = branch.commits.filter((commit) => !existingHashes.has(commit.hash));
     if (commits.length === 0) continue;
-    const heading = branch.repositoryLabel
-      ? `[분야: ${branch.repositoryLabel}] 브랜치: ${branch.branch}`
+    const heading = branch.branchLabel || branch.repositoryLabel
+      ? `[${branch.branchLabel || `분야: ${branch.repositoryLabel}`}] 브랜치: ${branch.branch}`
       : `브랜치: ${branch.branch}`;
     blocks.push(headingBlock(heading));
     blocks.push(paragraphBlock(`담당자: ${branch.author}`));

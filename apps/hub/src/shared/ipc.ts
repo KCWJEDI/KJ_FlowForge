@@ -69,6 +69,16 @@ export interface DailyAutomationView {
   running: boolean;
 }
 
+export interface NotionRepositoryView {
+  path: string;
+  project: string;
+  label: string;
+  username: string;
+  databaseId: string;
+  testState: "untested" | "testing" | "connected" | "error";
+  testMessage: string;
+}
+
 export interface GitChangeSummary {
   oldHead: string | null;
   newHead: string;
@@ -79,6 +89,7 @@ export interface GitChangeSummary {
 }
 
 export interface GitRepositorySetting {
+  project?: string;
   label: string;
   username?: string;
   defaultBranch?: string;
@@ -87,6 +98,7 @@ export interface GitRepositorySetting {
   branches: string[];
   discordMinCommits?: number;
   discordBranches?: string[];
+  notionDatabaseId?: string;
 }
 
 export interface SettingFieldView {
@@ -149,6 +161,7 @@ export interface HubApi {
   getSettings(): Promise<SettingsView>;
   saveSettings(values: Record<string, string>): Promise<SettingsSaveResult>;
   testIntegrations(): Promise<IntegrationConnectionStatus[]>;
+  testNotionDatabase(args: { repository?: string; databaseId: string }): Promise<{ ok: boolean; message: string }>;
   getLicenseStatus(): Promise<LicenseStatus>;
   activateLicense(key: string): Promise<LicenseStatus>;
   onStateChanged(listener: (state: DashboardState) => void): () => void;

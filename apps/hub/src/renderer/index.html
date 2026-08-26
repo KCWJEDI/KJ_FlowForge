@@ -94,6 +94,7 @@
         <nav class="tab-bar sub" id="settings-tabs" aria-label="Settings tabs">
           <button id="settings-tab-env" class="tab active" type="button" data-settings-panel="env">.env 수정</button>
           <button id="settings-tab-git" class="tab" type="button" data-settings-panel="git">Git 저장소</button>
+          <button id="settings-tab-notion" class="tab" type="button" data-settings-panel="notion">Notion 저장소</button>
           <button id="settings-tab-status" class="tab" type="button" data-settings-panel="status">연결 상태</button>
         </nav>
 
@@ -130,6 +131,19 @@
           <div class="row">
             <button id="settings-repositories-save" class="primary" type="button">저장소 설정 저장</button>
             <span id="settings-repositories-message" class="error-text" role="alert"></span>
+          </div>
+        </div>
+
+        <div id="settings-pane-notion" hidden>
+          <p class="muted">
+            저장소별로 Notion 데이터베이스를 연결합니다. 저장소가 추가되면 여기에 자동으로 표시되며,
+            각 저장소에서 사용할 Notion Database ID를 지정할 수 있습니다.
+            표시 형식: <strong>프로젝트이름 : 분야라벨 : 사용자이름</strong>
+          </p>
+          <div id="settings-notion-repositories" class="repository-list"></div>
+          <div class="row">
+            <button id="settings-notion-save" class="primary" type="button">Notion 저장소 설정 저장</button>
+            <span id="settings-notion-message" class="error-text" role="alert"></span>
           </div>
         </div>
 

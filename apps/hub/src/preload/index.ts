@@ -15,6 +15,7 @@ const api: HubApi = {
   getSettings: () => ipcRenderer.invoke("hub:get-settings"),
   saveSettings: (values) => ipcRenderer.invoke("hub:save-settings", values),
   testIntegrations: () => ipcRenderer.invoke("hub:test-integrations"),
+  testNotionDatabase: (args) => ipcRenderer.invoke("hub:test-notion-database", args),
   getLicenseStatus: () => ipcRenderer.invoke("hub:get-license-status"),
   activateLicense: (key) => ipcRenderer.invoke("hub:activate-license", { key }),
   onStateChanged: (listener) => {

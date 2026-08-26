@@ -220,7 +220,13 @@ export class DailyAutomation {
               attempts += 1;
               return this.options.git.captureBranchCommits(repository, branch, previousHead);
             });
-            captures.push({ repositoryLabel: repositorySetting.label, stateKey, ...capture });
+            captures.push({
+              repositoryLabel: repositorySetting.label,
+              stateKey,
+              notionDatabaseId: repositorySetting.notionDatabaseId ?? "",
+              project: repositorySetting.project ?? "",
+              ...capture,
+            });
             run.branches.push({
               repositoryLabel: repositorySetting.label,
               branch,
@@ -283,11 +289,30 @@ export class DailyAutomation {
   ): Promise<void> {
     // Notion 등록이 실패하면 HEAD를 갱신하지 않습니다. 같은 날짜/리포트 키로
     // 다음 실행이 페이지를 찾아 이어서 완성하거나 새로 생성합니다.
-    const branches = captures.map(buildDailyWorkBranch);
-    const reportPageId = await this.options.notion.createDailyWorkReport({ date, reportKey, branches });
+    // 저장소별 Notion 데이터베이스가 지정되어 있으면 데이터베이스 단위로 묶어 등록합니다.
+    const groups = new Map<string, CapturedBranch[]>();
+    for (const capture of captures) {
+      const key = (capture.notionDatabaseId ?? "").trim() || "__default__";
+      const list = groups.get(key) ?? [];
+      list.push(capture);
+      groups.set(key, list);
+    }
+    let reportPageId: string | undefined;
+    for (const [databaseKey, groupCaptures] of groups) {
+      const branches = groupCaptures.map(buildDailyWorkBranch);
+      const databaseId = databaseKey === "__default__" ? undefined : databaseKey;
+      const groupReportKey = databaseId ? `${reportKey}|${databaseId}` : reportKey;
+      const pageId = await this.options.notion.createDailyWorkReport({
+        date,
+        reportKey: groupReportKey,
+        repositoryDatabaseId: databaseId,
+        branches,
+      });
+      reportPageId = pageId;
+    }
     if (this.options.discord?.enabled) {
       try {
-        const discordBranches = filterDiscordBranches(branches, this.options.config.repositories);
+        const discordBranches = filterDiscordBranches(captures.map(buildDailyWorkBranch), this.options.config.repositories);
         if (discordBranches.length > 0) {
           await this.options.discord.sendMessage(buildDiscordDailySummary(date, discordBranches, reportPageId));
         }
@@ -405,6 +430,8 @@ export class DailyAutomation {
 interface CapturedBranch {
   repositoryLabel: string;
   stateKey: string;
+  notionDatabaseId?: string;
+  project?: string;
   repository: string;
   branch: string;
   previousHead: string | null;
@@ -413,7 +440,7 @@ interface CapturedBranch {
 }
 
 function buildDailyWorkBranch(capture: CapturedBranch): Parameters<NotionAdapter["createDailyWorkReport"]>[0]["branches"][number] {
-  const { repositoryLabel, branch, commits } = capture;
+  const { repositoryLabel, project, branch, commits } = capture;
   const authors = [...new Set(commits.map((commit) => commit.author).filter(Boolean))];
   const latest = commits.length > 0
     ? commits.reduce((current, commit) =>
@@ -426,6 +453,7 @@ function buildDailyWorkBranch(capture: CapturedBranch): Parameters<NotionAdapter
   }).join("\n\n");
   return {
     repositoryLabel,
+    branchLabel: project && repositoryLabel ? `${project} : ${repositoryLabel}` : repositoryLabel,
     branch,
     author: authors.join(", ") || "Unknown",
     occurredAt: latest?.timestamp ?? "",
@@ -459,8 +487,8 @@ function buildDiscordDailySummary(
   let totalCommits = 0;
   for (const branch of branches) {
     totalCommits += branch.commits.length;
-    const heading = branch.repositoryLabel
-      ? `[분야: ${branch.repositoryLabel}] 브랜치 ${branch.branch}`
+    const heading = branch.branchLabel || branch.repositoryLabel
+      ? `[${branch.branchLabel ? branch.branchLabel : `분야: ${branch.repositoryLabel}`}] 브랜치 ${branch.branch}`
       : `브랜치 ${branch.branch}`;
     lines.push("", `**${heading}**`, `담당: ${branch.author || "Unknown"}`);
     if (branch.commits.length === 0) {

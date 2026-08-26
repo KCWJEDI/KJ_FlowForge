@@ -40,9 +40,11 @@ const $ = {
   panelSettings: required<HTMLElement>(document.getElementById("panel-settings"), "panel-settings"),
   settingsTabEnv: required<HTMLButtonElement>(document.getElementById("settings-tab-env"), "settings-tab-env"),
   settingsTabGit: required<HTMLButtonElement>(document.getElementById("settings-tab-git"), "settings-tab-git"),
+  settingsTabNotion: required<HTMLButtonElement>(document.getElementById("settings-tab-notion"), "settings-tab-notion"),
   settingsTabStatus: required<HTMLButtonElement>(document.getElementById("settings-tab-status"), "settings-tab-status"),
   settingsPaneEnv: required<HTMLElement>(document.getElementById("settings-pane-env"), "settings-pane-env"),
   settingsPaneGit: required<HTMLElement>(document.getElementById("settings-pane-git"), "settings-pane-git"),
+  settingsPaneNotion: required<HTMLElement>(document.getElementById("settings-pane-notion"), "settings-pane-notion"),
   settingsPaneStatus: required<HTMLElement>(document.getElementById("settings-pane-status"), "settings-pane-status"),
   settingsEnvFile: required<HTMLElement>(document.getElementById("settings-env-file"), "settings-env-file"),
   settingsApiMissing: required<HTMLElement>(document.getElementById("settings-api-missing"), "settings-api-missing"),
@@ -57,6 +59,9 @@ const $ = {
   settingsRepositoryAdd: required<HTMLButtonElement>(document.getElementById("settings-repository-add"), "settings-repository-add"),
   settingsRepositoriesSave: required<HTMLButtonElement>(document.getElementById("settings-repositories-save"), "settings-repositories-save"),
   settingsRepositoriesMessage: required<HTMLElement>(document.getElementById("settings-repositories-message"), "settings-repositories-message"),
+  settingsNotionRepositories: required<HTMLElement>(document.getElementById("settings-notion-repositories"), "settings-notion-repositories"),
+  settingsNotionSave: required<HTMLButtonElement>(document.getElementById("settings-notion-save"), "settings-notion-save"),
+  settingsNotionMessage: required<HTMLElement>(document.getElementById("settings-notion-message"), "settings-notion-message"),
   integrationStatuses: required<HTMLElement>(document.getElementById("integration-statuses"), "integration-statuses"),
   settingsTestStatus: required<HTMLButtonElement>(document.getElementById("settings-test-status"), "settings-test-status"),
   automationState: required<HTMLElement>(document.getElementById("automation-state"), "automation-state"),
@@ -81,6 +86,9 @@ const state: {
   automationBusy: boolean;
   repositoryDrafts: GitRepositorySetting[];
   repositoryCollapsed: Record<number, boolean>;
+  notionRepositories: GitRepositorySetting[];
+  notionCollapsed: Record<number, boolean>;
+  notionTestStates: Record<number, { state: "untested" | "testing" | "connected" | "error"; message: string }>;
 } = {
   dashboard: null,
   git: null,
@@ -93,6 +101,9 @@ const state: {
   automationBusy: false,
   repositoryDrafts: [],
   repositoryCollapsed: {},
+  notionRepositories: [],
+  notionCollapsed: {},
+  notionTestStates: {},
 };
 
 function setStatus(message: string): void {
@@ -436,6 +447,7 @@ function renderDashboard(dashboard: DashboardState): void {
   $.automationSection.hidden = dashboard.role !== "admin";
   renderGitRepositoryOptions();
   renderDailyAutomation(dashboard.dailyAutomation);
+  renderSettingsNotion();
 }
 
 function formatTime(value: string): string {
@@ -487,12 +499,14 @@ function switchMainPanel(panel: "dashboard" | "settings"): void {
   }
 }
 
-function switchSettingsPanel(panel: "env" | "git" | "status"): void {
+function switchSettingsPanel(panel: "env" | "git" | "notion" | "status"): void {
   $.settingsPaneEnv.hidden = panel !== "env";
   $.settingsPaneGit.hidden = panel !== "git";
+  $.settingsPaneNotion.hidden = panel !== "notion";
   $.settingsPaneStatus.hidden = panel !== "status";
   $.settingsTabEnv.classList.toggle("active", panel === "env");
   $.settingsTabGit.classList.toggle("active", panel === "git");
+  $.settingsTabNotion.classList.toggle("active", panel === "notion");
   $.settingsTabStatus.classList.toggle("active", panel === "status");
   if (panel === "status" && state.settingsStatuses.length === 0) {
     void performTestIntegrations();
@@ -513,6 +527,7 @@ async function refreshSettings(): Promise<void> {
     state.settingsDrafts = {};
     renderSettingsForm();
     renderSettingsRepositories();
+    renderSettingsNotion();
     $.settingsEnvFile.textContent = state.settings.envFile;
     setSettingsMessage("설정을 불러왔습니다.");
   } catch (error) {
@@ -694,6 +709,8 @@ function renderSettingsRepositories(): void {
         branches: item.branches ?? [],
         discordMinCommits: item.discordMinCommits ?? 0,
         discordBranches: item.discordBranches ?? [],
+        project: item.project ?? "",
+        notionDatabaseId: item.notionDatabaseId ?? "",
       };
     });
   }
@@ -989,6 +1006,8 @@ async function saveRepositories(): Promise<void> {
       branches: draft.branches,
       discordMinCommits: draft.discordMinCommits ?? 0,
       discordBranches: draft.discordBranches ?? [],
+      project: draft.project?.trim() || undefined,
+      notionDatabaseId: draft.notionDatabaseId?.trim() || undefined,
     }));
   try {
     const result = await api.saveSettings({ HUB_GIT_REPOSITORIES: JSON.stringify(payload) });
@@ -999,6 +1018,180 @@ async function saveRepositories(): Promise<void> {
   } catch (error) {
     $.settingsRepositoriesMessage.textContent = `저장 실패: ${error instanceof Error ? error.message : String(error)}`;
   }
+}
+
+function notionDatabaseDrafts(): GitRepositorySetting[] {
+  return state.dashboard?.config.repositories ?? [];
+}
+
+function notionProjectName(repository: GitRepositorySetting): string {
+  if (repository.project && repository.project.trim().length > 0) return repository.project.trim();
+  return repository.label && repository.label.trim().length > 0 ? repository.label.trim() : "미설정";
+}
+
+function notionUserLabel(repository: GitRepositorySetting): string {
+  return repository.username && repository.username.trim().length > 0 ? repository.username.trim() : "KCWJEDI";
+}
+
+function notionSectionLabel(repository: GitRepositorySetting): string {
+  return repository.label && repository.label.trim().length > 0 ? repository.label.trim() : "미입력";
+}
+
+async function saveNotionSettings(): Promise<void> {
+  const api = settingsHub();
+  if (!api) return;
+  $.settingsNotionMessage.textContent = "저장 중...";
+  const payload = notionDatabaseDrafts()
+    .filter((draft) => draft.path.trim().length > 0)
+    .map((draft) => ({
+      label: draft.label || "저장소",
+      username: draft.username?.trim() ?? "",
+      defaultBranch: draft.defaultBranch?.trim() ?? "",
+      path: draft.path.trim(),
+      url: draft.url?.trim() ?? "",
+      branches: draft.branches,
+      discordMinCommits: draft.discordMinCommits ?? 0,
+      discordBranches: draft.discordBranches ?? [],
+      project: draft.project?.trim() || undefined,
+      notionDatabaseId: draft.notionDatabaseId?.trim() || undefined,
+    }));
+  try {
+    const result = await api.saveSettings({ HUB_GIT_REPOSITORIES: JSON.stringify(payload) });
+    state.settings = result.settings;
+    state.settingsStatuses = result.statuses;
+    $.settingsNotionMessage.textContent = "Notion 저장소 설정이 저장되었습니다.";
+    void refreshState();
+  } catch (error) {
+    $.settingsNotionMessage.textContent = "저장 실패: " + (error instanceof Error ? error.message : String(error));
+  }
+}
+
+function normalizeNotionIdInput(value: string): string {
+  const trimmed = (value || "").trim();
+  const match = trimmed.match(/[a-zA-Z0-9]{32}/);
+  return match ? match[0] : trimmed;
+}
+
+function renderSettingsNotion(): void {
+  const repositories = notionDatabaseDrafts();
+  $.settingsNotionRepositories.innerHTML = "";
+  if (repositories.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "등록된 Git 저장소가 없습니다. 먼저 설정 탭의 Git 저장소에서 저장소를 추가하세요.";
+    $.settingsNotionRepositories.appendChild(empty);
+    return;
+  }
+  for (let index = 0; index < repositories.length; index += 1) {
+    $.settingsNotionRepositories.appendChild(buildSettingsNotionCard(repositories[index]!, index));
+  }
+}
+
+async function runNotionDatabaseTest(index: number): Promise<void> {
+  const item = state.dashboard?.config.repositories[index];
+  if (!item || !item.notionDatabaseId?.trim()) return;
+  const dbId = normalizeNotionIdInput(item.notionDatabaseId);
+  item.notionDatabaseId = dbId;
+  state.notionTestStates[index] = { state: "testing", message: "연결 테스트 중..." };
+  $.settingsNotionMessage.textContent = "연결 테스트 중...";
+  try {
+    const result = await window.hub.testNotionDatabase({ repository: item.path, databaseId: dbId });
+    state.notionTestStates[index] = {
+      state: result.ok ? "connected" : "error",
+      message: result.message,
+    };
+    $.settingsNotionMessage.textContent = result.message;
+    $.settingsNotionMessage.className = result.ok ? "success-text" : "error-text";
+  } catch (error) {
+    const errorText = error instanceof Error ? error.message : String(error);
+    state.notionTestStates[index] = { state: "error", message: errorText };
+    $.settingsNotionMessage.textContent = "테스트 실패: " + errorText;
+    $.settingsNotionMessage.className = "error-text";
+  }
+}
+
+function buildSettingsNotionCard(repository: GitRepositorySetting, index: number): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "repository-card";
+
+  const head = document.createElement("div");
+  head.className = "repository-card-head";
+  const summary = document.createElement("span");
+  summary.className = "repo-summary";
+  summary.textContent = "{ " + notionSectionLabel(repository) + " : " + notionUserLabel(repository) + " : " + notionProjectName(repository) + " }";
+  head.appendChild(summary);
+  card.appendChild(head);
+
+  const pathLabel = document.createElement("div");
+  pathLabel.className = "muted";
+  pathLabel.textContent = "경로: " + (repository.path || repository.url || "—");
+  card.appendChild(pathLabel);
+
+  const databaseLabel = document.createElement("label");
+  databaseLabel.className = "repository-url-field";
+  databaseLabel.textContent = "Notion Database ID (URL 또는 ID)";
+  const databaseInput = document.createElement("input");
+  databaseInput.type = "text";
+  databaseInput.placeholder = "예: 3c67d5bccac580d38e2af8848f5f7abd 또는 노션 URL";
+  databaseInput.value = repository.notionDatabaseId ?? "";
+  let testTimer = undefined as ReturnType<typeof setTimeout> | undefined;
+  databaseInput.addEventListener("input", () => {
+    const updated = state.dashboard?.config.repositories;
+    if (!updated) return;
+    updated[index]!.notionDatabaseId = databaseInput.value.trim();
+    if (testTimer) clearTimeout(testTimer);
+    if (updated[index]!.notionDatabaseId) {
+      testTimer = setTimeout(() => void runNotionDatabaseTest(index), 700);
+    }
+  });
+  databaseLabel.appendChild(databaseInput);
+  card.appendChild(databaseLabel);
+
+  const row = document.createElement("div");
+  row.className = "repository-branch-row";
+  const testButton = document.createElement("button");
+  testButton.type = "button";
+  testButton.className = "ghost";
+  testButton.textContent = "연결 테스트";
+  const message = document.createElement("span");
+  message.className = "muted";
+  const testState = state.notionTestStates[index];
+  if (testState) {
+    message.textContent = testState.message;
+    if (testState.state === "connected") message.className = "success-text";
+    else if (testState.state === "error") message.className = "error-text";
+  }
+  const runTest = async (): Promise<void> => {
+    const item = state.dashboard?.config.repositories[index];
+    if (!item || !item.notionDatabaseId?.trim()) {
+      message.textContent = "Database ID를 먼저 입력하세요.";
+      return;
+    }
+    const dbId = normalizeNotionIdInput(item.notionDatabaseId);
+    item.notionDatabaseId = dbId;
+    databaseInput.value = dbId;
+    state.notionTestStates[index] = { state: "testing", message: "연결 테스트 중..." };
+    message.textContent = "연결 테스트 중...";
+    message.className = "muted";
+    try {
+      const result = await window.hub.testNotionDatabase({ repository: item.path, databaseId: dbId });
+      state.notionTestStates[index] = {
+        state: result.ok ? "connected" : "error",
+        message: result.message,
+      };
+      message.textContent = result.message;
+      message.className = result.ok ? "success-text" : "error-text";
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : String(error);
+      state.notionTestStates[index] = { state: "error", message: errorText };
+      message.textContent = "테스트 실패: " + errorText;
+      message.className = "error-text";
+    }
+  };
+  testButton.addEventListener("click", () => void runTest());
+  row.append(testButton, message);
+  card.appendChild(row);
+  return card;
 }
 
 const INTEGRATION_LABELS: Record<IntegrationConnectionStatus["integration"], string> = {
@@ -1064,6 +1257,7 @@ function bindEvents(): void {
   $.mainTabSettings.addEventListener("click", () => switchMainPanel("settings"));
   $.settingsTabEnv.addEventListener("click", () => switchSettingsPanel("env"));
   $.settingsTabGit.addEventListener("click", () => switchSettingsPanel("git"));
+  $.settingsTabNotion.addEventListener("click", () => switchSettingsPanel("notion"));
   $.settingsTabStatus.addEventListener("click", () => switchSettingsPanel("status"));
   $.settingsTest.addEventListener("click", () => void performTestIntegrations());
   $.settingsTestStatus.addEventListener("click", () => void performTestIntegrations());
@@ -1083,6 +1277,7 @@ function bindEvents(): void {
     renderSettingsRepositories();
   });
   $.settingsRepositoriesSave.addEventListener("click", () => void saveRepositories());
+  $.settingsNotionSave.addEventListener("click", () => void saveNotionSettings());
   $.automationSave.addEventListener("click", () => void saveDailyAutomation());
   $.automationRun.addEventListener("click", () => void runDailyAutomationNow());
 }

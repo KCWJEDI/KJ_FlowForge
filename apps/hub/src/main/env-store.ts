@@ -22,7 +22,7 @@ export const ENV_DEFINITIONS: EnvDefinition[] = [
   { key: "DISCORD_BOT_TOKEN", label: "Bot token", group: "Discord", kind: "secret", hint: "Discord Developer Portal → Bot → Reset Token" },
   { key: "DISCORD_CHANNEL_ID", label: "Channel ID", group: "Discord", kind: "text", hint: "Copy from a channel with Developer Mode enabled" },
   { key: "NOTION_TOKEN", label: "Integration token", group: "Notion", kind: "secret", hint: "Notion → Settings → Connections → integrations" },
-  { key: "NOTION_DATABASE_ID", label: "Database ID", group: "Notion", kind: "text", hint: "32-char ID from the database page URL" },
+  { key: "NOTION_DATABASE_ID", label: "Database ID (구버전 호환)", group: "Notion", kind: "text", hint: "더 이상 사용하지 않습니다. Notion 데이터베이스는 설정 탭의 'Notion 저장소'에서 저장소별로 지정하세요." },
   { key: "GITHUB_TOKEN", label: "Personal access token", group: "GitHub", kind: "secret", hint: "Needs repo scope; add workflow scope for workflow dispatch" },
 ];
 
