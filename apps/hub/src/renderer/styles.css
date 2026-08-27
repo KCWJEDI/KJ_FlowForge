@@ -477,6 +477,39 @@ details pre {
   box-sizing: border-box;
 }
 
+.project-filter {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.project-filter label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dashboard-git-grid {
+  align-items: stretch;
+}
+
+.dashboard-add-card {
+  min-height: 220px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font-size: 42px;
+  cursor: pointer;
+}
+
+.dashboard-add-card:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
 .input-required {
   border-color: var(--err) !important;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--err) 35%, transparent);

@@ -28,8 +28,10 @@
     <section id="panel-dashboard" class="layout">
       <div class="project-filter">
         <label>프로젝트 <select id="dashboard-project"></select></label>
+        <button id="dashboard-project-add" class="ghost" type="button">프로젝트 추가</button>
+        <button id="dashboard-project-rename" class="ghost" type="button">프로젝트 이름 변경</button>
       </div>
-      <section class="grid">
+      <section id="dashboard-git-grid" class="grid dashboard-git-grid">
         <div class="card">
           <div class="card-head">
             <h2>Git 커밋 / 푸시</h2>
@@ -63,6 +65,7 @@
             <span id="git-error" class="error-text" role="alert"></span>
           </div>
         </div>
+        <button id="dashboard-add-card" class="dashboard-add-card" type="button" title="Git 저장소 추가">+</button>
       </section>
 
     </section>

@@ -42,6 +42,9 @@ const $ = {
   panelAutomation: required<HTMLElement>(document.getElementById("panel-automation"), "panel-automation"),
   panelSettings: required<HTMLElement>(document.getElementById("panel-settings"), "panel-settings"),
   dashboardProject: required<HTMLSelectElement>(document.getElementById("dashboard-project"), "dashboard-project"),
+  dashboardProjectAdd: required<HTMLButtonElement>(document.getElementById("dashboard-project-add"), "dashboard-project-add"),
+  dashboardProjectRename: required<HTMLButtonElement>(document.getElementById("dashboard-project-rename"), "dashboard-project-rename"),
+  dashboardAddCard: required<HTMLButtonElement>(document.getElementById("dashboard-add-card"), "dashboard-add-card"),
   settingsTabEnv: required<HTMLButtonElement>(document.getElementById("settings-tab-env"), "settings-tab-env"),
   settingsTabGit: required<HTMLButtonElement>(document.getElementById("settings-tab-git"), "settings-tab-git"),
   settingsTabNotion: required<HTMLButtonElement>(document.getElementById("settings-tab-notion"), "settings-tab-notion"),
@@ -508,6 +511,99 @@ function renderProjectOptions(repositories: GitRepositorySetting[]): void {
   if (previous && Array.from($.dashboardProject.options).some((option) => option.value === previous)) {
     $.dashboardProject.value = previous;
   }
+  $.dashboardProjectRename.disabled = !$.dashboardProject.value;
+}
+
+function addDashboardGitCard(): void {
+  const project = $.dashboardProject.value;
+  const repositories = (state.dashboard?.config.repositories ?? []).filter((item) => projectName(item.project) === project);
+  if (repositories.length === 0) {
+    setStatus("현재 프로젝트에 추가된 Git 저장소가 없습니다.");
+    return;
+  }
+  const primary = $.gitRepository.closest<HTMLElement>(".card");
+  if (!primary) return;
+  const card = primary.cloneNode(true) as HTMLElement;
+  card.classList.add("dashboard-extra-card");
+  card.querySelectorAll<HTMLElement>("[id]").forEach((element) => element.removeAttribute("id"));
+  const select = card.querySelector<HTMLSelectElement>("select")!;
+  const refresh = card.querySelector<HTMLButtonElement>(".card-head button")!;
+  const branches = card.querySelectorAll<HTMLElement>(".branch-options")[0]!;
+  const summary = card.querySelector<HTMLElement>(".muted")!;
+  const conflicts = card.querySelector<HTMLElement>(".conflicts")!;
+  const table = card.querySelector<HTMLTableElement>("table")!;
+  const buttons = card.querySelectorAll<HTMLButtonElement>(".row button");
+  const commit = buttons[0]!;
+  const push = buttons[1]!;
+  const error = card.querySelector<HTMLElement>(".error-text")!;
+  select.innerHTML = "";
+  for (const repository of repositories) {
+    const option = document.createElement("option");
+    option.value = repository.path;
+    option.textContent = `${repository.label || "저장소"} · ${repository.username || "KCWJEDI"} · ${repository.path}`;
+    select.appendChild(option);
+  }
+  const render = async (): Promise<void> => {
+    error.textContent = "";
+    try {
+      const [git, names] = await Promise.all([window.hub.inspectGit(select.value), window.hub.listGitBranches(select.value)]);
+      summary.textContent = `브랜치 ${git.branch} · ${git.clean ? "변경 없음" : `${git.files.length}개 파일 변경`}`;
+      conflicts.hidden = git.conflicts.length === 0;
+      conflicts.textContent = git.conflicts.length ? `병합 충돌: ${git.conflicts.join(", ")}` : "";
+      branches.innerHTML = "";
+      for (const name of names) {
+        const label = document.createElement("label");
+        label.className = "branch-option";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = name === git.branch;
+        input.addEventListener("change", async () => {
+          if (!input.checked) { input.checked = name === git.branch; return; }
+          try { await window.hub.switchGitBranch({ repository: select.value, branch: name }); await render(); }
+          catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
+        });
+        label.append(input, document.createTextNode(name));
+        branches.appendChild(label);
+      }
+      const body = table.tBodies[0]!;
+      body.innerHTML = "";
+      for (const file of git.files) {
+        const row = body.insertRow();
+        row.insertCell().textContent = file.path;
+        row.insertCell().textContent = file.indexStatus;
+        row.insertCell().textContent = file.workTreeStatus;
+      }
+      commit.disabled = git.clean;
+      push.disabled = false;
+    } catch (cause) {
+      error.textContent = cause instanceof Error ? cause.message : String(cause);
+    }
+  };
+  select.addEventListener("change", () => void render());
+  refresh.addEventListener("click", () => void render());
+  commit.addEventListener("click", async () => {
+    try { await window.hub.gitCommit({ repository: select.value }); await render(); }
+    catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
+  });
+  push.addEventListener("click", async () => {
+    try { await window.hub.gitPush({ repository: select.value }); await render(); }
+    catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
+  });
+  $.dashboardAddCard.before(card);
+  void render();
+}
+
+async function saveProjectAssignments(repositories: GitRepositorySetting[]): Promise<void> {
+  const api = settingsHub();
+  if (!api) return;
+  const payload = repositories.map((item) => ({
+    ...item,
+    project: item.project?.trim() || undefined,
+    notionDatabaseId: item.notionDatabaseId?.trim() || undefined,
+  }));
+  await api.saveSettings({ HUB_GIT_REPOSITORIES: JSON.stringify(payload) });
+  state.repositoryDrafts = [];
+  await refreshState();
 }
 
 function formatTime(value: string): string {
@@ -1266,7 +1362,41 @@ function bindEvents(): void {
   $.mainTabDashboard.addEventListener("click", () => switchMainPanel("dashboard"));
   $.mainTabAutomation.addEventListener("click", () => switchMainPanel("automation"));
   $.mainTabSettings.addEventListener("click", () => switchMainPanel("settings"));
-  $.dashboardProject.addEventListener("change", () => { renderGitRepositoryOptions(); void refreshGit(); });
+  $.dashboardProject.addEventListener("change", () => {
+    document.querySelectorAll(".dashboard-extra-card").forEach((card) => card.remove());
+    renderGitRepositoryOptions();
+    void refreshGit();
+  });
+  $.dashboardProjectAdd.addEventListener("click", () => {
+    const name = window.prompt("추가할 프로젝트 이름을 입력하세요.")?.trim();
+    if (!name) return;
+    switchMainPanel("settings");
+    switchSettingsPanel("git");
+    state.repositoryDrafts.push({ project: name, label: "", username: "", defaultBranch: "", path: "", url: "", branches: [], discordMinCommits: 0, discordBranches: [] });
+    renderSettingsRepositories();
+    const input = $.settingsRepositories.querySelectorAll<HTMLInputElement>(".repository-path-input")[state.repositoryDrafts.length - 1];
+    input?.scrollIntoView({ behavior: "smooth", block: "center" });
+    input?.focus();
+    $.settingsRepositoriesMessage.textContent = `프로젝트 '${name}'의 Git 저장소를 등록한 뒤 저장하세요.`;
+  });
+  $.dashboardProjectRename.addEventListener("click", async () => {
+    const current = $.dashboardProject.value;
+    if (!current) return;
+    const name = window.prompt("새 프로젝트 이름을 입력하세요.", current)?.trim();
+    if (!name || name === current || !state.dashboard) return;
+    try {
+      const repositories = state.dashboard.config.repositories.map((item) =>
+        projectName(item.project) === current ? { ...item, project: name } : item,
+      );
+      await saveProjectAssignments(repositories);
+      $.dashboardProject.value = name;
+      renderGitRepositoryOptions();
+      setStatus(`프로젝트 이름을 '${name}'으로 변경했습니다.`);
+    } catch (error) {
+      setStatus(`프로젝트 이름 변경 실패: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
+  $.dashboardAddCard.addEventListener("click", addDashboardGitCard);
   $.settingsTabEnv.addEventListener("click", () => switchSettingsPanel("env"));
   $.settingsTabGit.addEventListener("click", () => switchSettingsPanel("git"));
   $.settingsTabNotion.addEventListener("click", () => {
