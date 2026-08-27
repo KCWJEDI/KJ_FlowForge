@@ -510,18 +510,15 @@ async function gitPushActiveBranches(args: { repository: string }): Promise<void
 }
 function previousEightIso() {
   const now = new Date();
-  const todayEight = new Date(now);
-  todayEight.setHours(8, 0, 0, 0);
-  if (now.getTime() < todayEight.getTime()) {
-    todayEight.setDate(todayEight.getDate() - 1);
-  }
-  const until = new Date(todayEight);
-  const since = new Date(todayEight);
+  // "당일 08시"을 기준으로, 실제 실행 시각과 무관하게 항상 [전날 08시 ~ 당일 08시) 구간을 만든다.
+  const until = new Date(now);
+  until.setHours(8, 0, 0, 0);
+  const since = new Date(until);
   since.setDate(since.getDate() - 1);
-  const month = String(todayEight.getMonth() + 1).padStart(2, "0");
-  const day = String(todayEight.getDate()).padStart(2, "0");
+  const month = String(until.getMonth() + 1).padStart(2, "0");
+  const day = String(until.getDate()).padStart(2, "0");
   return {
-    date: todayEight.getFullYear() + "-" + month + "-" + day,
+    date: until.getFullYear() + "-" + month + "-" + day,
     sinceIso: since.toISOString(),
     untilIso: until.toISOString(),
   };
