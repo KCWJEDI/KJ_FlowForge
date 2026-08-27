@@ -381,12 +381,14 @@ function parseBoolean(value?: string): boolean {
 function parseRepositoriesForConfig(raw?: string): Array<{
   label: string; username: string; defaultBranch: string; path: string; url: string;
   branches: string[]; discordMinCommits: number; discordBranches: string[];
+  project: string; notionDatabaseId: string;
 }> {
   if (!raw || !raw.trim()) return [];
   try {
     const parsed = JSON.parse(raw) as Array<Partial<{
       label: string; username: string; defaultBranch: string; path: string; url: string;
       branches: string[]; discordMinCommits: number; discordBranches: string[];
+      project: string; notionDatabaseId: string;
     }>>;
     if (!Array.isArray(parsed)) return [];
     return parsed
@@ -406,6 +408,8 @@ function parseRepositoriesForConfig(raw?: string): Array<{
         discordBranches: Array.isArray(item.discordBranches)
           ? item.discordBranches.filter((b): b is string => typeof b === "string")
           : [],
+        project: typeof item.project === "string" ? item.project.trim() : "",
+        notionDatabaseId: typeof item.notionDatabaseId === "string" ? item.notionDatabaseId.trim() : "",
       }));
   } catch {
     return [];
