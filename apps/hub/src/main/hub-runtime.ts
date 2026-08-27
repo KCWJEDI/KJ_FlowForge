@@ -144,6 +144,17 @@ export class HubRuntime extends EventEmitter {
     return this.git.inspect(target);
   }
 
+  public async gitPushBranch(repository: string | undefined, branch: string, remote = "origin"): Promise<GitStatusView> {
+    const target = this.resolveRepository(repository);
+    if (this.currentBranchCache.get(target) !== branch) {
+      this.currentBranchCache.set(target, branch);
+    }
+    await this.git.switchBranch(target, branch);
+    await this.git.push(target, remote, branch);
+    this.emitState();
+    return this.git.inspect(target);
+  }
+
   private assertPersonalBranch(target: string): void {
     if (this.role === "admin") return;
     const repository = this.config.repositories.find((item) => item.path === target);
@@ -198,6 +209,18 @@ export class HubRuntime extends EventEmitter {
     }
   }
 
+  /** 설정 탭 'Discord 채널'에서 특정 채널 ID의 연결을 테스트합니다. */
+  public async testDiscordChannel(args: { repository?: string; channelId: string }): Promise<{ ok: boolean; message: string }> {
+    const channelId = (args.channelId ?? "").trim();
+    if (!channelId) return { ok: false, message: "채널 ID를 먼저 입력하세요." };
+    try {
+      const message = await this.discord.testChannel(channelId);
+      return { ok: true, message };
+    } catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   private async normalizeNotionDatabaseId(value: string): Promise<string> {
     const trimmed = value.trim();
     if (!trimmed) return "";
@@ -233,12 +256,12 @@ export class HubRuntime extends EventEmitter {
           const parsed = JSON.parse(raw) as Array<Partial<{
             label: string; username: string; defaultBranch: string; path: string;
             url: string; branches: string[]; discordMinCommits: number; discordBranches: string[];
-            project: string; notionDatabaseId: string;
+            project: string; notionDatabaseId: string; discordChannelId: string;
           }>>;
           const validated: Array<{
             label: string; username: string; defaultBranch: string; path: string; url: string;
             branches: string[]; discordMinCommits: number; discordBranches: string[];
-            project: string; notionDatabaseId: string;
+            project: string; notionDatabaseId: string; discordChannelId: string;
           }> = [];
           for (const item of parsed) {
             const project = typeof item?.project === "string" ? item.project.trim() : "";
@@ -276,6 +299,7 @@ export class HubRuntime extends EventEmitter {
                 typeof item?.notionDatabaseId === "string"
                   ? (await this.normalizeNotionDatabaseId(item.notionDatabaseId))
                   : "",
+              discordChannelId: typeof item?.discordChannelId === "string" ? item.discordChannelId.trim() : "",
             });
           }
           updates.HUB_GIT_REPOSITORIES = JSON.stringify(validated);
@@ -387,14 +411,14 @@ function parseBoolean(value?: string): boolean {
 function parseRepositoriesForConfig(raw?: string): Array<{
   label: string; username: string; defaultBranch: string; path: string; url: string;
   branches: string[]; discordMinCommits: number; discordBranches: string[];
-  project: string; notionDatabaseId: string;
+  project: string; notionDatabaseId: string; discordChannelId: string;
 }> {
   if (!raw || !raw.trim()) return [];
   try {
     const parsed = JSON.parse(raw) as Array<Partial<{
       label: string; username: string; defaultBranch: string; path: string; url: string;
       branches: string[]; discordMinCommits: number; discordBranches: string[];
-      project: string; notionDatabaseId: string;
+      project: string; notionDatabaseId: string; discordChannelId: string;
     }>>;
     if (!Array.isArray(parsed)) return [];
     return parsed
@@ -416,6 +440,7 @@ function parseRepositoriesForConfig(raw?: string): Array<{
           : [],
         project: typeof item.project === "string" ? item.project.trim() : "",
         notionDatabaseId: typeof item.notionDatabaseId === "string" ? item.notionDatabaseId.trim() : "",
+        discordChannelId: typeof item.discordChannelId === "string" ? item.discordChannelId.trim() : "",
       }));
   } catch {
     return [];

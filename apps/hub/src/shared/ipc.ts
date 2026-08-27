@@ -129,6 +129,7 @@ export interface GitRepositorySetting {
   discordMinCommits?: number;
   discordBranches?: string[];
   notionDatabaseId?: string;
+  discordChannelId?: string;
 }
 
 export interface SettingFieldView {
@@ -186,6 +187,7 @@ export interface HubApi {
   gitStage(args: { repository?: string; paths: string[] }): Promise<GitStatusView>;
   gitCommit(args: { repository?: string }): Promise<GitChangeSummary>;
   gitPush(args: { repository?: string }): Promise<GitStatusView>;
+  gitPushBranch(args: { repository?: string; branch: string; remote?: string }): Promise<GitStatusView>;
   getDailyAutomation(): Promise<DailyAutomationView>;
   runDailyAutomation(): Promise<DailyAutomationRunView>;
   reportManualDailyReport(args: ManualDailyReportInput): Promise<ManualDailyReportResult>;
@@ -195,6 +197,7 @@ export interface HubApi {
   saveSettings(values: Record<string, string>): Promise<SettingsSaveResult>;
   testIntegrations(): Promise<IntegrationConnectionStatus[]>;
   testNotionDatabase(args: { repository?: string; databaseId: string }): Promise<{ ok: boolean; message: string }>;
+  testDiscordChannel(args: { repository?: string; channelId: string }): Promise<{ ok: boolean; message: string }>;
   getLicenseStatus(): Promise<LicenseStatus>;
   activateLicense(key: string): Promise<LicenseStatus>;
   replaceLicense(key: string): Promise<LicenseStatus>;

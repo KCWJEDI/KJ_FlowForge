@@ -43,7 +43,7 @@ const $ = {
   panelAutomation: required<HTMLElement>(document.getElementById("panel-automation"), "panel-automation"),
   panelSettings: required<HTMLElement>(document.getElementById("panel-settings"), "panel-settings"),
   dashboardProject: required<HTMLSelectElement>(document.getElementById("dashboard-project"), "dashboard-project"),
-  dashboardProjectAdd: required<HTMLButtonElement>(document.getElementById("dashboard-project-add"), "dashboard-project-add"),
+  dashboardProjectRenameInput: required<HTMLInputElement>(document.getElementById("dashboard-project-rename-input"), "dashboard-project-rename-input"),
   dashboardProjectRename: required<HTMLButtonElement>(document.getElementById("dashboard-project-rename"), "dashboard-project-rename"),
   dashboardAddCard: required<HTMLButtonElement>(document.getElementById("dashboard-add-card"), "dashboard-add-card"),
   settingsTabEnv: required<HTMLButtonElement>(document.getElementById("settings-tab-env"), "settings-tab-env"),
@@ -75,6 +75,11 @@ const $ = {
   settingsNotionRepositories: required<HTMLElement>(document.getElementById("settings-notion-repositories"), "settings-notion-repositories"),
   settingsNotionSave: required<HTMLButtonElement>(document.getElementById("settings-notion-save"), "settings-notion-save"),
   settingsNotionMessage: required<HTMLElement>(document.getElementById("settings-notion-message"), "settings-notion-message"),
+  settingsTabDiscord: required<HTMLButtonElement>(document.getElementById("settings-tab-discord"), "settings-tab-discord"),
+  settingsPaneDiscord: required<HTMLElement>(document.getElementById("settings-pane-discord"), "settings-pane-discord"),
+  settingsDiscordRepositories: required<HTMLElement>(document.getElementById("settings-discord-repositories"), "settings-discord-repositories"),
+  settingsDiscordSave: required<HTMLButtonElement>(document.getElementById("settings-discord-save"), "settings-discord-save"),
+  settingsDiscordMessage: required<HTMLElement>(document.getElementById("settings-discord-message"), "settings-discord-message"),
   integrationStatuses: required<HTMLElement>(document.getElementById("integration-statuses"), "integration-statuses"),
   settingsTestStatus: required<HTMLButtonElement>(document.getElementById("settings-test-status"), "settings-test-status"),
   automationState: required<HTMLElement>(document.getElementById("automation-state"), "automation-state"),
@@ -95,7 +100,9 @@ const state: {
   gitWorkBranches: string[];
   gitWorkBranchesProject: string;
   gitWorkBranchesByProject: Record<string, string[]>;
-  gitCardsByProject: Record<string, Array<{ path: string; workBranches: string[] }>>;
+  gitActiveBranches: string[];
+  gitActiveBranchesByProject: Record<string, string[]>;
+  gitCardsByProject: Record<string, Array<{ path: string; workBranches: string[]; activeBranches: string[] }>>;
   settings: SettingsView | null;
   settingsStatuses: IntegrationConnectionStatus[];
   settingsBusy: boolean;
@@ -107,6 +114,8 @@ const state: {
   notionRepositories: GitRepositorySetting[];
   notionCollapsed: Record<number, boolean>;
   notionTestStates: Record<number, { state: "untested" | "testing" | "connected" | "error"; message: string }>;
+  discordRepositories: GitRepositorySetting[];
+  discordTestStates: Record<number, { state: "untested" | "testing" | "connected" | "error"; message: string }>;
 } = {
   dashboard: null,
   git: null,
@@ -115,6 +124,8 @@ const state: {
   gitWorkBranches: [],
   gitWorkBranchesProject: "",
   gitWorkBranchesByProject: {},
+  gitActiveBranches: [],
+  gitActiveBranchesByProject: {},
   gitCardsByProject: {},
   settings: null,
   settingsStatuses: [],
@@ -127,6 +138,8 @@ const state: {
   notionRepositories: [],
   notionCollapsed: {},
   notionTestStates: {},
+  discordRepositories: [],
+  discordTestStates: {},
 };
 
 function setStatus(message: string): void {
@@ -161,6 +174,50 @@ function integrationDotMeta(
   return { className: "off", title: `${label}: 확인 전 — 연결 상태 탭에서 테스트를 실행하세요.` };
 }
 
+function notionDotMeta(): { className: string; title: string } {
+  const repos = state.notionRepositories;
+  if (repos.length === 0) return { className: "off", title: "Notion: 등록된 저장소 없음" };
+  const tests = state.notionTestStates;
+  let connected = 0;
+  let error = 0;
+  let testing = 0;
+  for (let index = 0; index < repos.length; index += 1) {
+    const test = tests[index];
+    const hasDbId = Boolean(repos[index]?.notionDatabaseId?.trim());
+    if (!hasDbId || !test || test.state === "untested") continue;
+    if (test.state === "connected") connected += 1;
+    else if (test.state === "error") error += 1;
+    else if (test.state === "testing") testing += 1;
+  }
+  if (testing > 0) return { className: "off", title: "Notion: 연결 테스트 진행 중…" };
+  if (connected === 0 && error === 0) return { className: "off", title: "Notion: 확인 전 — 저장소별 DB 연결 테스트를 실행하세요." };
+  if (error === 0) return { className: "on", title: "Notion: 모든 저장소 연결 성공 (" + connected + "개)" };
+  if (connected > 0) return { className: "warn", title: "Notion: 일부 연결 실패 (성공 " + connected + "개 / 실패 " + error + "개)" };
+  return { className: "error", title: "Notion: 모든 저장소 연결 실패 (" + error + "개)" };
+}
+
+function discordDotMeta(): { className: string; title: string } {
+  const repos = state.discordRepositories;
+  if (repos.length === 0) return { className: "off", title: "Discord: 등록된 저장소 없음" };
+  const tests = state.discordTestStates;
+  let connected = 0;
+  let error = 0;
+  let testing = 0;
+  for (let index = 0; index < repos.length; index += 1) {
+    const test = tests[index];
+    const hasChannelId = Boolean(repos[index]?.discordChannelId?.trim());
+    if (!hasChannelId || !test || test.state === "untested") continue;
+    if (test.state === "connected") connected += 1;
+    else if (test.state === "error") error += 1;
+    else if (test.state === "testing") testing += 1;
+  }
+  if (testing > 0) return { className: "off", title: "Discord: 연결 테스트 진행 중…" };
+  if (connected === 0 && error === 0) return { className: "off", title: "Discord: 확인 전 — 저장소별 채널 연결 테스트를 실행하세요." };
+  if (error === 0) return { className: "on", title: "Discord: 모든 저장소 연결 성공 (" + connected + "개)" };
+  if (connected > 0) return { className: "warn", title: "Discord: 일부 연결 실패 (성공 " + connected + "개 / 실패 " + error + "개)" };
+  return { className: "error", title: "Discord: 모든 저장소 연결 실패 (" + error + "개)" };
+}
+
 function renderHeader(dashboard: DashboardState): void {
   $.headerMeta.textContent = `Started ${formatTime(dashboard.startedAt)} · HTTP ${dashboard.config.httpPort}`;
   const integrations = [
@@ -170,7 +227,7 @@ function renderHeader(dashboard: DashboardState): void {
   ];
   $.integrationDots.innerHTML = "";
   for (const integration of integrations) {
-    const meta = integrationDotMeta(integration.key);
+    const meta = integration.key === "notion" ? notionDotMeta() : integration.key === "discord" ? discordDotMeta() : integrationDotMeta(integration.key);
     const dot = document.createElement("span");
     dot.className = `dot ${meta.className}`;
     dot.textContent = integration.label;
@@ -220,6 +277,11 @@ function persistGitWorkBranches(): void {
   state.gitWorkBranchesByProject[project] = state.gitWorkBranches.slice();
 }
 
+function persistGitActiveBranches(): void {
+  const project = $.dashboardProject.value || "";
+  state.gitActiveBranchesByProject[project] = state.gitActiveBranches.slice();
+}
+
 function currentlySelectedProject(): string {
   return $.dashboardProject.value || "";
 }
@@ -232,13 +294,22 @@ function restoreProjectWorkBranches(): void {
   }
 }
 
+function restoreProjectActiveBranches(): void {
+  const project = currentlySelectedProject();
+  const saved = state.gitActiveBranchesByProject[project];
+  if (saved && saved.length > 0) {
+    state.gitActiveBranches = saved.slice();
+  } else {
+    state.gitActiveBranches = state.gitWorkBranches.slice();
+  }
+}
+
 async function refreshGit(): Promise<void> {
   setGitError("");
   state.gitBusy = true;
   $.gitRefresh.disabled = true;
   $.gitCommit.disabled = true;
   $.gitPush.disabled = true;
-  setStatus("Git 상태 읽는 중…");
   try {
     const repository = selectedRepository();
     [state.git, state.gitBranches] = await Promise.all([
@@ -328,10 +399,11 @@ function updateGitButtons(): void {
   }
   const hasRepo = Boolean(selectedRepository());
   const hasChanges = state.git !== null && !state.git.clean;
-  const hasBranches = state.gitWorkBranches.length > 0;
-  $.gitCommit.disabled = !hasRepo || !hasChanges;
-  $.gitPush.disabled = !hasRepo;
-  $.gitDailyReport.disabled = !hasRepo || !hasBranches;
+  const activeBranches = state.gitActiveBranches.filter((branch) => branch.trim().length > 0);
+  const hasActiveBranches = activeBranches.length > 0;
+  $.gitCommit.disabled = !hasRepo || !hasChanges || activeBranches.length !== 1;
+  $.gitPush.disabled = !hasRepo || !hasActiveBranches;
+  $.gitDailyReport.disabled = !hasRepo || !hasActiveBranches;
 }
 
 async function runGitCommit(): Promise<void> {
@@ -341,11 +413,19 @@ async function runGitCommit(): Promise<void> {
     setGitError("저장소를 선택하세요.");
     return;
   }
+  const activeBranches = state.gitActiveBranches.filter((branch) => branch.trim().length > 0);
+  if (activeBranches.length !== 1) {
+    setGitError(activeBranches.length === 0 ? "활성 브랜치를 1개 선택하세요." : "커밋은 활성 브랜치가 정확히 1개일 때만 가능합니다. 다른 브랜치를 비활성화하세요.");
+    return;
+  }
   state.gitBusy = true;
   $.gitCommit.disabled = true;
   $.gitPush.disabled = true;
   setStatus("변경사항을 요약해 커밋하는 중…");
   try {
+    if (state.git?.branch !== activeBranches[0]) {
+      await window.hub.switchGitBranch({ repository: repo, branch: activeBranches[0]! });
+    }
     const summary = await window.hub.gitCommit({ repository: repo });
     setStatus(`커밋 완료(푸시 대기): ${summary.newHead.slice(0, 8)} — 푸시 버튼을 눌러야 원격에 반영됩니다`);
     await refreshGit();
@@ -365,13 +445,29 @@ async function runGitPush(): Promise<void> {
     setGitError("저장소를 선택하세요.");
     return;
   }
+  const branches = state.gitActiveBranches.filter((branch) => branch.trim().length > 0);
+  if (branches.length === 0) {
+    setGitError("활성 브랜치를 하나 이상 선택하세요.");
+    return;
+  }
   state.gitBusy = true;
   $.gitCommit.disabled = true;
   $.gitPush.disabled = true;
   setStatus("푸시하는 중…");
+  const errors: string[] = [];
+  const pushed: string[] = [];
   try {
-    await window.hub.gitPush({ repository: repo });
-    setStatus("푸시 완료");
+    for (const branch of branches) {
+      setStatus("푸시하는 중 … " + branch);
+      try {
+        await window.hub.gitPushBranch({ repository: repo, branch });
+        pushed.push(branch);
+      } catch (error) {
+        errors.push(branch + ": " + (error instanceof Error ? error.message : String(error)));
+      }
+    }
+    if (errors.length > 0) setGitError(errors.join("\n"));
+    setStatus(errors.length > 0 ? "푸시 부분 완료 (" + pushed.length + "개 성공)" : "푸시 완료 (" + pushed.join(", ") + ")");
     await refreshGit();
   } catch (error) {
     setGitError(error instanceof Error ? error.message : String(error));
@@ -382,6 +478,19 @@ async function runGitPush(): Promise<void> {
   }
 }
 
+async function gitPushActiveBranches(args: { repository: string }): Promise<void> {
+  const active = currentCardActiveBranches(args.repository).filter((branch) => branch.trim().length > 0);
+  if (active.length === 0) throw new Error("활성 브랜치를 하나 이상 선택하세요.");
+  const errors: string[] = [];
+  for (const branch of active) {
+    try {
+      await window.hub.gitPushBranch({ repository: args.repository, branch: branch });
+    } catch (cause: unknown) {
+      errors.push(branch + ": " + (cause instanceof Error ? cause.message : String(cause)));
+    }
+  }
+  if (errors.length > 0) throw new Error(errors.join("\n"));
+}
 function previousEightIso() {
   const now = new Date();
   const todayEight = new Date(now);
@@ -408,9 +517,9 @@ async function runGitDailyReport() {
     setGitError("저장소를 선택하세요.");
     return;
   }
-  const branches = state.gitWorkBranches.filter((branch) => branch.trim().length > 0);
+  const branches = state.gitActiveBranches.filter((branch) => branch.trim().length > 0);
   if (branches.length === 0) {
-    setGitError("작업 브랜치를 하나 이상 선택하세요.");
+    setGitError("활성 브랜치를 하나 이상 선택하세요.");
     return;
   }
   state.gitBusy = true;
@@ -547,13 +656,14 @@ async function refreshState(): Promise<void> {
 
 function renderDashboard(dashboard: DashboardState): void {
   state.dashboard = dashboard;
+  renderSettingsNotion();
+  renderSettingsDiscord();
   renderHeader(dashboard);
   $.mainTabAutomation.hidden = dashboard.role !== "admin";
   if (dashboard.role !== "admin" && !$.panelAutomation.hidden) switchMainPanel("dashboard");
   renderProjectOptions(dashboard.config.repositories);
   renderGitRepositoryOptions();
   renderDailyAutomation(dashboard.dailyAutomation);
-  renderSettingsNotion();
 }
 
 function renderGitBranches(): void {
@@ -574,7 +684,9 @@ function renderGitBranches(): void {
     select.value = "";
     if (!branch || state.gitWorkBranches.includes(branch)) return;
     state.gitWorkBranches.push(branch);
+    if (!state.gitActiveBranches.includes(branch)) state.gitActiveBranches.push(branch);
     persistGitWorkBranches();
+    persistGitActiveBranches();
     renderGitBranches();
     state.gitBusy = true;
     try {
@@ -588,18 +700,46 @@ function renderGitBranches(): void {
     }
   });
   $.gitBranches.appendChild(select);
+  const allRow = document.createElement("label");
+  allRow.className = "branch-all-row";
+  const allInput = document.createElement("input");
+  allInput.type = "checkbox";
+  allInput.checked = state.gitWorkBranches.length > 0 && state.gitActiveBranches.length === state.gitWorkBranches.length;
+  allInput.title = "전체 선택";
+  allInput.addEventListener("change", () => {
+    state.gitActiveBranches = allInput.checked ? state.gitWorkBranches.slice() : [];
+    persistGitActiveBranches();
+    renderGitBranches();
+    updateGitButtons();
+  });
+  const allText = document.createElement("span");
+  allText.textContent = "전체 선택";
+  allRow.append(allInput, allText);
+  $.gitBranches.appendChild(allRow);
   const chips = document.createElement("div");
   chips.className = "branch-options";
   for (const branch of state.gitWorkBranches) {
+    const isActive = state.gitActiveBranches.includes(branch);
     const label = document.createElement("span");
-    label.className = "branch-option" + (state.git?.branch === branch ? " active" : "");
-    label.textContent = branch;
-    label.title = "브랜치 삭제";
-    label.addEventListener("click", () => {
-      state.gitWorkBranches = state.gitWorkBranches.filter((value) => value !== branch);
-      persistGitWorkBranches();
+    label.className = isActive ? "branch-option active" : "branch-option";
+    const activeInput = document.createElement("input");
+    activeInput.type = "checkbox";
+    activeInput.className = "branch-active-cb";
+    activeInput.checked = isActive;
+    activeInput.title = "활성/비활성";
+    activeInput.addEventListener("change", (event) => {
+      event.stopPropagation();
+      if (activeInput.checked) {
+        if (!state.gitActiveBranches.includes(branch)) state.gitActiveBranches.push(branch);
+      } else {
+        state.gitActiveBranches = state.gitActiveBranches.filter((value) => value !== branch);
+      }
+      persistGitActiveBranches();
       renderGitBranches();
     });
+    const text = document.createElement("span");
+    text.textContent = branch;
+    label.append(activeInput, text);
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "chip-remove";
@@ -608,7 +748,9 @@ function renderGitBranches(): void {
     remove.addEventListener("click", (event) => {
       event.stopPropagation();
       state.gitWorkBranches = state.gitWorkBranches.filter((value) => value !== branch);
+      state.gitActiveBranches = state.gitActiveBranches.filter((value) => value !== branch);
       persistGitWorkBranches();
+      persistGitActiveBranches();
       renderGitBranches();
     });
     label.appendChild(remove);
@@ -668,7 +810,26 @@ function saveCardBranches(path: string, branches: string[]): void {
   if (found) {
     found.workBranches = branches.slice();
   } else {
-    state.gitCardsByProject[project] = [...cards, { path, workBranches: branches.slice() }];
+    state.gitCardsByProject[project] = [...cards, { path, workBranches: branches.slice(), activeBranches: branches.slice() }];
+  }
+}
+
+function currentCardActiveBranches(path: string): string[] {
+  const project = currentlySelectedProject();
+  const cards = state.gitCardsByProject[project] ?? [];
+  const found = cards.find((item) => item.path === path);
+  return found ? found.activeBranches.slice() : [];
+}
+
+function saveCardActiveBranches(path: string, active: string[]): void {
+  const project = currentlySelectedProject();
+  const cards = state.gitCardsByProject[project] ?? [];
+  let found = cards.find((item) => item.path === path);
+  if (found) {
+    found.activeBranches = active.slice();
+  } else {
+    const storedBranches = currentCardBranches(path);
+    state.gitCardsByProject[project] = [...cards, { path, workBranches: storedBranches, activeBranches: active.slice() }];
   }
 }
 
@@ -705,7 +866,8 @@ function addDashboardGitCard(initialPath?: string): void {
   card.querySelectorAll<HTMLElement>("[id]").forEach((element) => element.removeAttribute("id"));
   const select = card.querySelector<HTMLSelectElement>("select")!;
   const refresh = card.querySelector<HTMLButtonElement>(".card-head button")!;
-  const branches = card.querySelectorAll<HTMLElement>(".branch-options")[0]!;
+  const branches = card.querySelector<HTMLElement>(".git-branch-picker")!;
+  branches.innerHTML = "";
   const summary = card.querySelector<HTMLElement>(".muted")!;
   const conflicts = card.querySelector<HTMLElement>(".conflicts")!;
   const table = card.querySelector<HTMLTableElement>("table")!;
@@ -736,11 +898,13 @@ function addDashboardGitCard(initialPath?: string): void {
         names,
         current: git.branch,
         selected: currentCardBranches(select.value),
+        active: currentCardActiveBranches(select.value),
         onSwitch: async (branch) => {
           try { await window.hub.switchGitBranch({ repository: select.value, branch }); await render(); }
           catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
         },
         onChange: (list) => saveCardBranches(select.value, list),
+        onActiveChange: (active) => saveCardActiveBranches(select.value, active),
       });
       const body = table.tBodies[0]!;
       body.innerHTML = "";
@@ -750,9 +914,10 @@ function addDashboardGitCard(initialPath?: string): void {
         row.insertCell().textContent = file.indexStatus;
         row.insertCell().textContent = file.workTreeStatus;
       }
-      commit.disabled = git.clean;
-      push.disabled = false;
-      if (report) report.disabled = currentCardBranches(select.value).length === 0;
+      const active = currentCardActiveBranches(select.value).filter((branch) => branch.trim().length > 0);
+      commit.disabled = git.clean || active.length !== 1;
+      push.disabled = active.length === 0;
+      if (report) report.disabled = active.length === 0;
     } catch (cause) {
       error.textContent = cause instanceof Error ? cause.message : String(cause);
     }
@@ -760,11 +925,21 @@ function addDashboardGitCard(initialPath?: string): void {
   select.addEventListener("change", () => void render());
   refresh.addEventListener("click", () => void render());
   commit.addEventListener("click", async () => {
-    try { await window.hub.gitCommit({ repository: select.value }); await render(); }
+    try {
+      const active = currentCardActiveBranches(select.value).filter((branch) => branch.trim().length > 0);
+      if (active.length !== 1) {
+        error.textContent = active.length === 0 ? "활성 브랜치를 1개 선택하세요." : "커밋은 활성 브랜치가 정확히 1개일 때만 가능합니다.";
+        return;
+      }
+      const git = await window.hub.inspectGit(select.value);
+      if (git.branch !== active[0]) await window.hub.switchGitBranch({ repository: select.value, branch: active[0]! });
+      await window.hub.gitCommit({ repository: select.value });
+      await render();
+    }
     catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
   });
   push.addEventListener("click", async () => {
-    try { await window.hub.gitPush({ repository: select.value }); await render(); }
+    try { await gitPushActiveBranches({ repository: select.value }); await render(); }
     catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
   });
   if (report) {
@@ -825,15 +1000,22 @@ function buildWorkBranchPicker(options: {
   names: string[];
   current: string;
   selected?: string[];
+  active?: string[];
+  onActiveChange?: (active: string[]) => void;
   onSwitch: (branch: string) => Promise<void>;
   onChange?: (branches: string[]) => void;
 }): void {
-  const { container, names, current, onSwitch, onChange } = options;
+  const { container, names, current, onSwitch, onChange, onActiveChange } = options;
   container.innerHTML = "";
   const seed = (options.selected && options.selected.length > 0 ? options.selected : [current]);
   const workBranches: string[] = [];
   for (const branch of seed) {
     if (!workBranches.includes(branch)) workBranches.push(branch);
+  }
+  const activeBranches: string[] = [];
+  const seedActive = (options.active && options.active.length > 0 ? options.active : seed);
+  for (const branch of seedActive) {
+    if (workBranches.includes(branch) && !activeBranches.includes(branch)) activeBranches.push(branch);
   }
   const select = document.createElement("select");
   select.className = "branch-select";
@@ -847,28 +1029,65 @@ function buildWorkBranchPicker(options: {
     select.value = "";
     if (!branch || workBranches.includes(branch)) return;
     workBranches.push(branch);
+    if (!activeBranches.includes(branch)) activeBranches.push(branch);
     void onSwitch(branch);
     renderChips();
     onChange?.(workBranches.slice());
+    onActiveChange?.(activeBranches.slice());
   });
   container.appendChild(select);
+  const allRow = document.createElement("label");
+  allRow.className = "branch-all-row";
+  const allInput = document.createElement("input");
+  allInput.type = "checkbox";
+  allInput.title = "전체 선택";
+  allInput.addEventListener("change", () => {
+    activeBranches.length = 0;
+    if (allInput.checked) for (const branch of workBranches) activeBranches.push(branch);
+    renderChips();
+    updateAllInput();
+    onActiveChange?.(activeBranches.slice());
+  });
+  const allText = document.createElement("span");
+  allText.textContent = "전체 선택";
+  allRow.append(allInput, allText);
+  container.appendChild(allRow);
   const chips = document.createElement("div");
   chips.className = "branch-options";
   container.appendChild(chips);
+  function updateAllInput(): void {
+    allInput.checked = workBranches.length > 0 && activeBranches.length === workBranches.length;
+  }
   function renderChips(): void {
     chips.innerHTML = "";
     if (workBranches.length === 0) {
       chips.textContent = "선택된 작업 브랜치가 없습니다.";
+      updateAllInput();
       return;
     }
     for (const branch of workBranches) {
       const label = document.createElement("span");
-      label.className = "branch-option" + (branch === current ? " active" : "");
-      label.textContent = branch;
-      if (branch !== current) {
-        label.title = "이 브랜치로 전환 (클릭)";
-        label.addEventListener("click", () => { void onSwitch(branch); });
-      }
+      const isActive = activeBranches.includes(branch);
+      label.className = "branch-option" + (isActive ? " active" : "");
+      const activeInput = document.createElement("input");
+      activeInput.type = "checkbox";
+      activeInput.className = "branch-active-cb";
+      activeInput.checked = isActive;
+      activeInput.title = "활성/비활성";
+      activeInput.addEventListener("change", (event) => {
+        event.stopPropagation();
+        if (activeInput.checked) {
+          if (!activeBranches.includes(branch)) activeBranches.push(branch);
+        } else {
+          const index = activeBranches.indexOf(branch);
+          if (index >= 0) activeBranches.splice(index, 1);
+        }
+        renderChips();
+        onActiveChange?.(activeBranches.slice());
+      });
+      const text = document.createElement("span");
+      text.textContent = branch;
+      label.append(activeInput, text);
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "chip-remove";
@@ -878,12 +1097,16 @@ function buildWorkBranchPicker(options: {
         event.stopPropagation();
         const index = workBranches.indexOf(branch);
         if (index >= 0) workBranches.splice(index, 1);
+        const activeIndex = activeBranches.indexOf(branch);
+        if (activeIndex >= 0) activeBranches.splice(activeIndex, 1);
         renderChips();
         onChange?.(workBranches.slice());
+        onActiveChange?.(activeBranches.slice());
       });
       label.appendChild(remove);
       chips.appendChild(label);
     }
+    updateAllInput();
   }
   renderChips();
 }
@@ -951,15 +1174,17 @@ function switchMainPanel(panel: "dashboard" | "automation" | "settings"): void {
   }
 }
 
-function switchSettingsPanel(panel: "env" | "git" | "notion" | "status" | "license"): void {
+function switchSettingsPanel(panel: "env" | "git" | "notion" | "discord" | "status" | "license"): void {
   $.settingsPaneEnv.hidden = panel !== "env";
   $.settingsPaneGit.hidden = panel !== "git";
   $.settingsPaneNotion.hidden = panel !== "notion";
+  $.settingsPaneDiscord.hidden = panel !== "discord";
   $.settingsPaneStatus.hidden = panel !== "status";
   $.settingsPaneLicense.hidden = panel !== "license";
   $.settingsTabEnv.classList.toggle("active", panel === "env");
   $.settingsTabGit.classList.toggle("active", panel === "git");
   $.settingsTabNotion.classList.toggle("active", panel === "notion");
+  $.settingsTabDiscord.classList.toggle("active", panel === "discord");
   $.settingsTabStatus.classList.toggle("active", panel === "status");
   $.settingsTabLicense.classList.toggle("active", panel === "license");
   if (panel === "status" && state.settingsStatuses.length === 0) {
@@ -982,6 +1207,7 @@ async function refreshSettings(): Promise<void> {
     renderSettingsForm();
     renderSettingsRepositories();
     renderSettingsNotion();
+    renderSettingsDiscord();
     $.settingsEnvFile.textContent = state.settings.envFile;
     setSettingsMessage("설정을 불러왔습니다.");
   } catch (error) {
@@ -1149,9 +1375,9 @@ async function performTestIntegrations(): Promise<void> {
     setSettingsBusy(false);
   }
 }
-function renderSettingsRepositories(): void {
+function renderSettingsRepositories(skipAutoLoad = false): void {
   const configured = state.dashboard?.config.repositories ?? [];
-  if (state.repositoryDrafts.length === 0 && configured.length > 0) {
+  if (!skipAutoLoad && state.repositoryDrafts.length === 0 && configured.length > 0) {
     state.repositoryDrafts = configured.map((item) => {
       const itemPath = (item.path ?? "").replace(/[\\/]+$/, "");
       return {
@@ -1165,12 +1391,19 @@ function renderSettingsRepositories(): void {
         discordBranches: item.discordBranches ?? [],
         project: item.project ?? "",
         notionDatabaseId: item.notionDatabaseId ?? "",
+        discordChannelId: item.discordChannelId ?? "",
       };
     });
   }
   $.settingsRepositories.innerHTML = "";
   for (let index = 0; index < state.repositoryDrafts.length; index += 1) {
     $.settingsRepositories.appendChild(buildSettingsRepositoryCard(index));
+  }
+  if (state.repositoryDrafts.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "등록된 Git 저장소가 없습니다. 저장 버튼을 누르면 빈 목록으로 저장됩니다.";
+    $.settingsRepositories.appendChild(empty);
   }
 }
 
@@ -1226,10 +1459,14 @@ function buildSettingsRepositoryCard(index: number): HTMLElement {
   });
   removeButton.addEventListener("click", () => {
     state.repositoryDrafts.splice(index, 1);
-    renderSettingsRepositories();
+    renderSettingsRepositories(true);
   });
   head.append(toggleButton, summary, removeButton);
   card.appendChild(head);
+  const labelTitle = document.createElement("div");
+  labelTitle.className = "setting-label repo-field-title";
+  labelTitle.textContent = "분야 라벨";
+  card.appendChild(labelTitle);
   card.appendChild(labelInput);
 
   const projectLabel = document.createElement("label");
@@ -1247,6 +1484,10 @@ function buildSettingsRepositoryCard(index: number): HTMLElement {
   projectLabel.appendChild(projectInput);
   card.appendChild(projectLabel);
 
+  const pathTitle = document.createElement("div");
+  pathTitle.className = "setting-label repo-field-title";
+  pathTitle.textContent = "프로젝트 로컬 저장소";
+  card.appendChild(pathTitle);
   const pathRow = document.createElement("div");
   pathRow.className = "repository-picker";
   const pathInput = document.createElement("input");
@@ -1333,31 +1574,6 @@ function buildSettingsRepositoryCard(index: number): HTMLElement {
   minimumLabel.appendChild(minimumInput);
   discordBlock.appendChild(minimumLabel);
 
-  const discordBranchTitle = document.createElement("div");
-  discordBranchTitle.className = "muted";
-  discordBranchTitle.textContent = "Discord로 보낼 브랜치 (선택하지 않으면 전체)";
-  discordBlock.appendChild(discordBranchTitle);
-  const discordBranchOptions = document.createElement("div");
-  discordBranchOptions.className = "branch-options";
-  const discordBranches = [...new Set([...(viewItem?.availableBranches ?? []), ...(draft.discordBranches ?? [])])];
-  for (const branch of discordBranches) {
-    const label = document.createElement("label");
-    label.className = "branch-option";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.value = branch;
-    input.checked = (draft.discordBranches ?? []).includes(branch);
-    input.addEventListener("change", () => {
-      const item = state.repositoryDrafts[index];
-      if (!item) return;
-      item.discordBranches ??= [];
-      if (input.checked && !item.discordBranches.includes(branch)) item.discordBranches.push(branch);
-      if (!input.checked) item.discordBranches = item.discordBranches.filter((value) => value !== branch);
-    });
-    label.append(input, document.createTextNode(branch));
-    discordBranchOptions.appendChild(label);
-  }
-  discordBlock.append(discordBranchTitle, discordBranchOptions);
   card.appendChild(discordBlock);
   return card;
 }
@@ -1392,6 +1608,7 @@ async function saveRepositories(): Promise<void> {
       discordBranches: draft.discordBranches ?? [],
       project: draft.project!.trim(),
       notionDatabaseId: draft.notionDatabaseId?.trim() || undefined,
+      discordChannelId: draft.discordChannelId?.trim() || undefined,
     }));
   try {
     const result = await api.saveSettings({ HUB_GIT_REPOSITORIES: JSON.stringify(payload) });
@@ -1401,6 +1618,8 @@ async function saveRepositories(): Promise<void> {
     state.repositoryDrafts = [];
     await refreshState();
     renderSettingsRepositories();
+    renderSettingsNotion();
+    renderSettingsDiscord();
   } catch (error) {
     $.settingsRepositoriesMessage.textContent = `저장 실패: ${error instanceof Error ? error.message : String(error)}`;
   }
@@ -1440,6 +1659,7 @@ async function saveNotionSettings(): Promise<void> {
       discordBranches: draft.discordBranches ?? [],
       project: draft.project?.trim() || undefined,
       notionDatabaseId: (state.notionRepositories[index]?.notionDatabaseId ?? draft.notionDatabaseId)?.trim() || undefined,
+      discordChannelId: (state.notionRepositories[index]?.discordChannelId ?? draft.discordChannelId)?.trim() || undefined,
     }));
   try {
     const result = await api.saveSettings({ HUB_GIT_REPOSITORIES: JSON.stringify(payload) });
@@ -1473,6 +1693,7 @@ function renderSettingsNotion(): void {
       discordBranches: item.discordBranches ?? [],
       project: item.project ?? "",
       notionDatabaseId: previous?.notionDatabaseId ?? item.notionDatabaseId ?? "",
+      discordChannelId: previous?.discordChannelId ?? item.discordChannelId ?? "",
     };
   });
   $.settingsNotionRepositories.innerHTML = "";
@@ -1503,11 +1724,13 @@ async function runNotionDatabaseTest(index: number): Promise<void> {
     };
     $.settingsNotionMessage.textContent = result.message;
     $.settingsNotionMessage.className = result.ok ? "success-text" : "error-text";
+    if (state.dashboard) renderHeader(state.dashboard);
   } catch (error) {
     const errorText = error instanceof Error ? error.message : String(error);
     state.notionTestStates[index] = { state: "error", message: errorText };
     $.settingsNotionMessage.textContent = "테스트 실패: " + errorText;
     $.settingsNotionMessage.className = "error-text";
+    if (state.dashboard) renderHeader(state.dashboard);
   }
 }
 
@@ -1595,6 +1818,177 @@ function buildSettingsNotionCard(repository: GitRepositorySetting, index: number
   return card;
 }
 
+function discordDatabaseDrafts(): GitRepositorySetting[] {
+  return state.dashboard?.config.repositories ?? [];
+}
+
+function renderSettingsDiscord(): void {
+  const repositories = discordDatabaseDrafts();
+  state.discordRepositories = repositories.map((item, index) => {
+    const previous = state.discordRepositories[index];
+    return {
+      label: item.label ?? "",
+      username: item.username ?? "",
+      defaultBranch: item.defaultBranch ?? "",
+      path: item.path ?? "",
+      url: item.url ?? "",
+      branches: item.branches ?? [],
+      discordMinCommits: item.discordMinCommits ?? 0,
+      discordBranches: item.discordBranches ?? [],
+      project: item.project ?? "",
+      notionDatabaseId: item.notionDatabaseId ?? "",
+      discordChannelId: previous?.discordChannelId ?? item.discordChannelId ?? "",
+    };
+  });
+  $.settingsDiscordRepositories.innerHTML = "";
+  if (repositories.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "등록된 Git 저장소가 없습니다. 먼저 설정 탭의 Git 저장소에서 저장소를 추가하세요.";
+    $.settingsDiscordRepositories.appendChild(empty);
+    return;
+  }
+  for (let index = 0; index < repositories.length; index += 1) {
+    $.settingsDiscordRepositories.appendChild(buildSettingsDiscordCard(state.discordRepositories[index]!, index));
+  }
+}
+
+function buildSettingsDiscordCard(repository: GitRepositorySetting, index: number): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "repository-card";
+
+  const head = document.createElement("div");
+  head.className = "repository-card-head";
+  const summary = document.createElement("span");
+  summary.className = "repo-summary";
+  summary.textContent = "{ " + notionSectionLabel(repository) + " : " + notionUserLabel(repository) + " : " + notionProjectName(repository) + " }";
+  head.appendChild(summary);
+  card.appendChild(head);
+
+  const pathLabel = document.createElement("div");
+  pathLabel.className = "muted";
+  pathLabel.textContent = "경로: " + (repository.path || repository.url || "—");
+  card.appendChild(pathLabel);
+
+  const channelLabel = document.createElement("label");
+  channelLabel.className = "repository-url-field";
+  channelLabel.textContent = "Discord 채널 ID";
+  const channelInput = document.createElement("input");
+  channelInput.type = "text";
+  channelInput.placeholder = "예: 1345800000000000000 (디스코드 개발자 모드에서 채널 우클릭 → ID 복사)";
+  channelInput.value = repository.discordChannelId ?? "";
+  let testTimer = undefined as ReturnType<typeof setTimeout> | undefined;
+  channelInput.addEventListener("input", () => {
+    const draft = state.discordRepositories[index];
+    if (!draft) return;
+    draft.discordChannelId = channelInput.value.trim();
+    if (testTimer) clearTimeout(testTimer);
+    if (draft.discordChannelId) {
+      testTimer = setTimeout(() => void runDiscordChannelTest(index), 700);
+    }
+  });
+  channelLabel.appendChild(channelInput);
+  card.appendChild(channelLabel);
+
+  const row = document.createElement("div");
+  row.className = "repository-branch-row";
+  const testButton = document.createElement("button");
+  testButton.type = "button";
+  testButton.className = "ghost";
+  testButton.textContent = "연결 테스트";
+  const message = document.createElement("span");
+  message.className = "muted";
+  const testState = state.discordTestStates[index];
+  if (testState) {
+    message.textContent = testState.message;
+    if (testState.state === "connected") message.className = "success-text";
+    else if (testState.state === "error") message.className = "error-text";
+  }
+  const runTest = async (): Promise<void> => {
+    const item = state.discordRepositories[index];
+    if (!item || !item.discordChannelId?.trim()) {
+      message.textContent = "채널 ID를 먼저 입력하세요.";
+      return;
+    }
+    state.discordTestStates[index] = { state: "testing", message: "연결 테스트 중..." };
+    message.textContent = "연결 테스트 중...";
+    message.className = "muted";
+    try {
+      const result = await window.hub.testDiscordChannel({ repository: item.path, channelId: item.discordChannelId.trim() });
+      state.discordTestStates[index] = {
+        state: result.ok ? "connected" : "error",
+        message: result.message,
+      };
+      message.textContent = result.message;
+      message.className = result.ok ? "success-text" : "error-text";
+      if (state.dashboard) renderHeader(state.dashboard);
+    } catch (error) {
+      const errorText = error instanceof Error ? error.message : String(error);
+      state.discordTestStates[index] = { state: "error", message: errorText };
+      message.textContent = "테스트 실패: " + errorText;
+      message.className = "error-text";
+      if (state.dashboard) renderHeader(state.dashboard);
+    }
+  };
+  testButton.addEventListener("click", () => void runTest());
+  row.append(testButton, message);
+  card.appendChild(row);
+  return card;
+}
+
+async function runDiscordChannelTest(index: number): Promise<void> {
+  const item = state.discordRepositories[index];
+  if (!item || !item.discordChannelId?.trim()) return;
+  state.discordTestStates[index] = { state: "testing", message: "연결 테스트 중..." };
+  $.settingsDiscordMessage.textContent = "연결 테스트 중...";
+  try {
+    const result = await window.hub.testDiscordChannel({ repository: item.path, channelId: item.discordChannelId.trim() });
+    state.discordTestStates[index] = {
+      state: result.ok ? "connected" : "error",
+      message: result.message,
+    };
+    $.settingsDiscordMessage.textContent = result.message;
+    $.settingsDiscordMessage.className = result.ok ? "success-text" : "error-text";
+    if (state.dashboard) renderHeader(state.dashboard);
+  } catch (error) {
+    const errorText = error instanceof Error ? error.message : String(error);
+    state.discordTestStates[index] = { state: "error", message: errorText };
+    $.settingsDiscordMessage.textContent = "테스트 실패: " + errorText;
+    $.settingsDiscordMessage.className = "error-text";
+    if (state.dashboard) renderHeader(state.dashboard);
+  }
+}
+
+async function saveDiscordSettings(): Promise<void> {
+  const api = settingsHub();
+  if (!api) return;
+  $.settingsDiscordMessage.textContent = "저장 중...";
+  const payload = discordDatabaseDrafts()
+    .filter((draft) => draft.path.trim().length > 0)
+    .map((draft, index) => ({
+      label: draft.label || "저장소",
+      username: draft.username?.trim() ?? "",
+      defaultBranch: draft.defaultBranch?.trim() ?? "",
+      path: draft.path.trim(),
+      url: draft.url?.trim() ?? "",
+      branches: draft.branches,
+      discordMinCommits: draft.discordMinCommits ?? 0,
+      discordBranches: draft.discordBranches ?? [],
+      project: draft.project?.trim() || undefined,
+      notionDatabaseId: draft.notionDatabaseId?.trim() || undefined,
+      discordChannelId: (state.discordRepositories[index]?.discordChannelId ?? draft.discordChannelId)?.trim() || undefined,
+    }));
+  try {
+    const result = await api.saveSettings({ HUB_GIT_REPOSITORIES: JSON.stringify(payload) });
+    state.settings = result.settings;
+    state.settingsStatuses = result.statuses;
+    $.settingsDiscordMessage.textContent = "Discord 저장소 설정이 저장되었습니다.";
+    void refreshState();
+  } catch (error) {
+    $.settingsDiscordMessage.textContent = "저장 실패: " + (error instanceof Error ? error.message : String(error));
+  }
+}
+
 const INTEGRATION_LABELS: Record<IntegrationConnectionStatus["integration"], string> = {
   discord: "Discord",
   notion: "Notion",
@@ -1617,7 +2011,15 @@ function renderIntegrationStatuses(statuses: IntegrationConnectionStatus[]): voi
     $.integrationStatuses.appendChild(empty);
     return;
   }
-  for (const status of statuses) {
+  const filtered = statuses.filter((status) => status.integration === "github");
+  if (filtered.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "GitHub 연결 상태만 표시됩니다. 저장소 연결은 설정 탭의 Notion/Discord 저장소에서 확인하세요.";
+    $.integrationStatuses.appendChild(empty);
+    return;
+  }
+  for (const status of filtered) {
     const card = document.createElement("div");
     card.className = `status-card ${status.state}`;
     const head = document.createElement("div");
@@ -1661,26 +2063,15 @@ function bindEvents(): void {
   $.dashboardProject.addEventListener("change", () => {
     document.querySelectorAll(".dashboard-extra-card").forEach((card) => card.remove());
     restoreProjectWorkBranches();
+    restoreProjectActiveBranches();
     renderGitRepositoryOptions();
     void refreshGit();
     restoreDashboardGitCards();
   });
-  $.dashboardProjectAdd.addEventListener("click", () => {
-    const name = window.prompt("추가할 프로젝트 이름을 입력하세요.")?.trim();
-    if (!name) return;
-    switchMainPanel("settings");
-    switchSettingsPanel("git");
-    state.repositoryDrafts.push({ project: name, label: "", username: "", defaultBranch: "", path: "", url: "", branches: [], discordMinCommits: 0, discordBranches: [] });
-    renderSettingsRepositories();
-    const input = $.settingsRepositories.querySelectorAll<HTMLInputElement>(".repository-path-input")[state.repositoryDrafts.length - 1];
-    input?.scrollIntoView({ behavior: "smooth", block: "center" });
-    input?.focus();
-    $.settingsRepositoriesMessage.textContent = `프로젝트 '${name}'의 Git 저장소를 등록한 뒤 저장하세요.`;
-  });
   $.dashboardProjectRename.addEventListener("click", async () => {
     const current = $.dashboardProject.value;
     if (!current) return;
-    const name = window.prompt("새 프로젝트 이름을 입력하세요.", current)?.trim();
+    const name = $.dashboardProjectRenameInput.value.trim();
     if (!name || name === current || !state.dashboard) return;
     try {
       const repositories = state.dashboard.config.repositories.map((item) =>
@@ -1688,6 +2079,7 @@ function bindEvents(): void {
       );
       await saveProjectAssignments(repositories);
       $.dashboardProject.value = name;
+      $.dashboardProjectRenameInput.value = "";
       renderGitRepositoryOptions();
       setStatus(`프로젝트 이름을 '${name}'으로 변경했습니다.`);
     } catch (error) {
@@ -1701,6 +2093,11 @@ function bindEvents(): void {
     switchSettingsPanel("notion");
     renderSettingsNotion();
   });
+  $.settingsTabDiscord.addEventListener("click", () => {
+    switchSettingsPanel("discord");
+    renderSettingsDiscord();
+  });
+  $.settingsDiscordSave.addEventListener("click", () => void saveDiscordSettings());
   $.settingsTabStatus.addEventListener("click", () => switchSettingsPanel("status"));
   $.settingsTabLicense.addEventListener("click", () => switchSettingsPanel("license"));
   $.settingsLicenseChange.addEventListener("click", async () => {
@@ -1744,6 +2141,8 @@ async function init(): Promise<void> {
   setStatus("Connecting to hub…");
   await refreshState();
   state.gitWorkBranches = [];
+  restoreProjectWorkBranches();
+  restoreProjectActiveBranches();
   void refreshGit();
   if (settingsHub()) {
     void refreshSettings();

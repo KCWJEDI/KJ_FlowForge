@@ -14,11 +14,20 @@ const stageSchema = z.object({
 });
 const commitSchema = z.object({ repository: z.string().min(1).optional() });
 const pushSchema = z.object({ repository: z.string().min(1).optional() });
+const pushBranchSchema = z.object({
+  repository: z.string().min(1).optional(),
+  branch: z.string().min(1),
+  remote: z.string().min(1).optional(),
+});
 const settingsSchema = z.record(z.string(), z.string().max(16_384));
 const licenseSchema = z.object({ key: z.string().min(8).max(256) });
 const notionDatabaseSchema = z.object({
   repository: z.string().optional(),
   databaseId: z.string().max(128),
+});
+const discordChannelSchema = z.object({
+  repository: z.string().optional(),
+  channelId: z.string().max(256),
 });
 const manualDailyReportSchema = z.object({
   date: z.string().min(1),
@@ -114,6 +123,10 @@ export function registerIpc(
     const input = pushSchema.parse(raw);
     return runtime.gitPushCreatedCommit(optionalRepository(input.repository));
   });
+  ipcMain.handle("hub:git-push-branch", (_event, raw: unknown) => {
+    const input = pushBranchSchema.parse(raw);
+    return runtime.gitPushBranch(optionalRepository(input.repository), input.branch, input.remote ?? "origin");
+  });
   ipcMain.handle("hub:get-daily-automation", () => runtime.getDailyAutomation());
   ipcMain.handle("hub:run-daily-automation", () => runtime.runDailyAutomation());
   ipcMain.handle("hub:report-manual-daily-report", (_event, raw: unknown) => {
@@ -142,6 +155,10 @@ export function registerIpc(
     const input = notionDatabaseSchema.parse(raw ?? {});
     return runtime.testNotionDatabase(input);
   });
+  ipcMain.handle("hub:test-discord-channel", (_event, raw: unknown) => {
+    const input = discordChannelSchema.parse(raw ?? {});
+    return runtime.testDiscordChannel(input);
+  });
   const stateListener = (state: unknown): void => {
     const window = getWindow();
     if (window && !window.isDestroyed()) window.webContents.send("hub:state-changed", state);
@@ -156,6 +173,7 @@ export function registerIpc(
       "hub:git-stage",
       "hub:git-commit",
       "hub:git-push",
+      "hub:git-push-branch",
       "hub:get-daily-automation",
       "hub:run-daily-automation",
       "hub:report-manual-daily-report",
@@ -165,6 +183,7 @@ export function registerIpc(
       "hub:save-settings",
       "hub:test-integrations",
       "hub:test-notion-database",
+      "hub:test-discord-channel",
     ]) {
       ipcMain.removeHandler(channel);
     }

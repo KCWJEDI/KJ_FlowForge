@@ -366,6 +366,7 @@ details pre {
 }
 
 .branch-option {
+  display: flex;
   flex-direction: row;
   align-items: center;
   gap: 6px;
@@ -386,6 +387,8 @@ details pre {
   flex: 1 1 220px;
   min-width: 200px;
   max-width: 360px;
+  height: 32px;
+  overflow: hidden;
 }
 
 .branch-option .chip-remove {
@@ -401,6 +404,29 @@ details pre {
 
 .branch-option .chip-remove:hover {
   color: var(--danger);
+}
+
+.branch-all-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.branch-option .branch-active-cb {
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.git-branch-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .discord-condition-block {
@@ -759,6 +785,12 @@ details pre {
 .setting-label {
   color: var(--text);
   font-size: 13px;
+}
+
+.repo-field-title {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .setting-input-row {

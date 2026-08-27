@@ -34,6 +34,14 @@ export class DiscordAdapter {
     return `Channel ${channel.id}`;
   }
 
+  public async testChannel(channelId: string): Promise<string> {
+    const id = (channelId ?? "").trim();
+    if (!this.client || !id) throw new Error("Discord integration or channel is not configured");
+    const channel = await this.client.channels.fetch(id);
+    if (!channel?.isSendable()) throw new Error(`Discord channel '${id}' is not sendable`);
+    return `Channel ${channel.id}`;
+  }
+
   public async sendMessage(content: string, channelId = this.config.channelId): Promise<string> {
     if (!this.client || !channelId) throw new Error("Discord integration or channel is not configured");
     const channel = await this.client.channels.fetch(channelId);
