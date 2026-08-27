@@ -376,6 +376,33 @@ details pre {
   color: var(--text);
 }
 
+.branch-option.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.branch-select {
+  flex: 1 1 220px;
+  min-width: 200px;
+  max-width: 360px;
+}
+
+.branch-option .chip-remove {
+  margin-left: 2px;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.branch-option .chip-remove:hover {
+  color: var(--danger);
+}
+
 .discord-condition-block {
   display: flex;
   flex-direction: column;

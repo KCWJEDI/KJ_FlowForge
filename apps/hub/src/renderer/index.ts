@@ -91,6 +91,7 @@ const state: {
   git: GitStatusView | null;
   gitBusy: boolean;
   gitBranches: string[];
+  gitWorkBranches: string[];
   settings: SettingsView | null;
   settingsStatuses: IntegrationConnectionStatus[];
   settingsBusy: boolean;
@@ -107,6 +108,7 @@ const state: {
   git: null,
   gitBusy: false,
   gitBranches: [],
+  gitWorkBranches: [],
   settings: null,
   settingsStatuses: [],
   settingsBusy: false,
@@ -219,6 +221,9 @@ async function refreshGit(): Promise<void> {
       window.hub.inspectGit(repository),
       window.hub.listGitBranches(repository),
     ]);
+    if (state.git && state.git.branch && !state.gitWorkBranches.includes(state.git.branch)) {
+      state.gitWorkBranches = [state.git.branch];
+    }
     renderGit();
   } catch (error) {
     $.gitSummary.textContent = "Git 사용 불가";
@@ -463,31 +468,88 @@ function renderGitBranches(): void {
     $.gitBranches.textContent = "선택 가능한 로컬 브랜치가 없습니다.";
     return;
   }
-  for (const branch of state.gitBranches) {
-    const label = document.createElement("label");
-    label.className = "branch-option";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = state.git?.branch === branch;
-    input.disabled = state.gitBusy;
-    input.addEventListener("change", async () => {
-      if (!input.checked || state.git?.branch === branch) {
-        input.checked = state.git?.branch === branch;
-        return;
-      }
-      state.gitBusy = true;
-      try {
-        state.git = await window.hub.switchGitBranch({ repository: selectedRepository(), branch });
-        await refreshGit();
-      } catch (error) {
-        setGitError(error instanceof Error ? error.message : String(error));
-        renderGitBranches();
-      } finally {
-        state.gitBusy = false;
-      }
+  const select = document.createElement("select");
+  select.className = "branch-select";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "작업 브랜치 선택…";
+  select.appendChild(placeholder);
+  appendBranchOptions(select, state.gitBranches);
+  select.addEventListener("change", async () => {
+    const branch = select.value;
+    select.value = "";
+    if (!branch || state.gitWorkBranches.includes(branch)) return;
+    state.gitWorkBranches.push(branch);
+    renderGitBranches();
+    state.gitBusy = true;
+    try {
+      state.git = await window.hub.switchGitBranch({ repository: selectedRepository(), branch });
+      await refreshGit();
+    } catch (error) {
+      setGitError(error instanceof Error ? error.message : String(error));
+      renderGitBranches();
+    } finally {
+      state.gitBusy = false;
+    }
+  });
+  $.gitBranches.appendChild(select);
+  const chips = document.createElement("div");
+  chips.className = "branch-options";
+  for (const branch of state.gitWorkBranches) {
+    const label = document.createElement("span");
+    label.className = "branch-option" + (state.git?.branch === branch ? " active" : "");
+    label.textContent = branch;
+    label.title = "브랜치 삭제";
+    label.addEventListener("click", () => {
+      state.gitWorkBranches = state.gitWorkBranches.filter((value) => value !== branch);
+      renderGitBranches();
     });
-    label.append(input, document.createTextNode(branch));
-    $.gitBranches.appendChild(label);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "chip-remove";
+    remove.textContent = "×";
+    remove.title = "작업 브랜치에서 제거";
+    remove.addEventListener("click", (event) => {
+      event.stopPropagation();
+      state.gitWorkBranches = state.gitWorkBranches.filter((value) => value !== branch);
+      renderGitBranches();
+    });
+    label.appendChild(remove);
+    chips.appendChild(label);
+  }
+  $.gitBranches.appendChild(chips);
+}
+
+function appendBranchOptions(select: HTMLSelectElement, branches: string[]): void {
+  const groups = new Map<string, string[]>();
+  for (const branch of branches) {
+    const index = branch.indexOf("/");
+    const groupPrefix = index > 0 ? branch.slice(0, index) : "";
+    if (groupPrefix) {
+      const bucket = groups.get(groupPrefix) ?? [];
+      bucket.push(branch);
+      groups.set(groupPrefix, bucket);
+    } else {
+      const option = document.createElement("option");
+      option.value = branch;
+      option.textContent = branch;
+      select.appendChild(option);
+    }
+  }
+  const sortedKeys = [...groups.keys()].sort((a, b) => a.localeCompare(b));
+  for (const key of sortedKeys) {
+    const groupHeading = document.createElement("option");
+    groupHeading.value = "";
+    groupHeading.disabled = true;
+    groupHeading.textContent = "─ " + key + " ─";
+    select.appendChild(groupHeading);
+    const bucket = groups.get(key)!.sort((a, b) => a.localeCompare(b));
+    for (const branch of bucket) {
+      const option = document.createElement("option");
+      option.value = branch;
+      option.textContent = "  ↳ " + branch;
+      select.appendChild(option);
+    }
   }
 }
 
@@ -550,21 +612,15 @@ function addDashboardGitCard(): void {
       summary.textContent = `브랜치 ${git.branch} · ${git.clean ? "변경 없음" : `${git.files.length}개 파일 변경`}`;
       conflicts.hidden = git.conflicts.length === 0;
       conflicts.textContent = git.conflicts.length ? `병합 충돌: ${git.conflicts.join(", ")}` : "";
-      branches.innerHTML = "";
-      for (const name of names) {
-        const label = document.createElement("label");
-        label.className = "branch-option";
-        const input = document.createElement("input");
-        input.type = "checkbox";
-        input.checked = name === git.branch;
-        input.addEventListener("change", async () => {
-          if (!input.checked) { input.checked = name === git.branch; return; }
-          try { await window.hub.switchGitBranch({ repository: select.value, branch: name }); await render(); }
+      buildWorkBranchPicker({
+        container: branches,
+        names,
+        current: git.branch,
+        onSwitch: async (branch) => {
+          try { await window.hub.switchGitBranch({ repository: select.value, branch }); await render(); }
           catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
-        });
-        label.append(input, document.createTextNode(name));
-        branches.appendChild(label);
-      }
+        },
+      });
       const body = table.tBodies[0]!;
       body.innerHTML = "";
       for (const file of git.files) {
@@ -589,8 +645,74 @@ function addDashboardGitCard(): void {
     try { await window.hub.gitPush({ repository: select.value }); await render(); }
     catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
   });
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.className = "ghost danger";
+  removeButton.textContent = "카드 삭제";
+  removeButton.addEventListener("click", () => card.remove());
+  card.querySelector(".card-head")!.append(removeButton);
   $.dashboardAddCard.before(card);
   void render();
+}
+
+function buildWorkBranchPicker(options: {
+  container: HTMLElement;
+  names: string[];
+  current: string;
+  onSwitch: (branch: string) => Promise<void>;
+}): void {
+  const { container, names, current, onSwitch } = options;
+  container.innerHTML = "";
+  const workBranches: string[] = [current];
+  const select = document.createElement("select");
+  select.className = "branch-select";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "작업 브랜치 선택…";
+  select.appendChild(placeholder);
+  appendBranchOptions(select, names);
+  select.addEventListener("change", () => {
+    const branch = select.value;
+    select.value = "";
+    if (!branch || workBranches.includes(branch)) return;
+    workBranches.push(branch);
+    void onSwitch(branch);
+    renderChips();
+  });
+  container.appendChild(select);
+  const chips = document.createElement("div");
+  chips.className = "branch-options";
+  container.appendChild(chips);
+  function renderChips(): void {
+    chips.innerHTML = "";
+    if (workBranches.length === 0) {
+      chips.textContent = "선택된 작업 브랜치가 없습니다.";
+      return;
+    }
+    for (const branch of workBranches) {
+      const label = document.createElement("span");
+      label.className = "branch-option" + (branch === current ? " active" : "");
+      label.textContent = branch;
+      if (branch !== current) {
+        label.title = "이 브랜치로 전환 (클릭)";
+        label.addEventListener("click", () => { void onSwitch(branch); });
+      }
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "chip-remove";
+      remove.textContent = "×";
+      remove.title = "작업 브랜치에서 제거";
+      remove.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const index = workBranches.indexOf(branch);
+        if (index >= 0) workBranches.splice(index, 1);
+        renderChips();
+      });
+      label.appendChild(remove);
+      chips.appendChild(label);
+    }
+  }
+  renderChips();
 }
 
 async function saveProjectAssignments(repositories: GitRepositorySetting[]): Promise<void> {
@@ -1441,10 +1563,12 @@ function bindEvents(): void {
   $.automationRun.addEventListener("click", () => void runDailyAutomationNow());
 }
 
-function init(): void {
+async function init(): Promise<void> {
   bindEvents();
   setStatus("Connecting to hub…");
-  void Promise.all([refreshState(), refreshGit()]);
+  await refreshState();
+  state.gitWorkBranches = [];
+  void refreshGit();
   if (settingsHub()) {
     void refreshSettings();
   } else {
@@ -1461,4 +1585,4 @@ function init(): void {
   if (settingsHub()) void performTestIntegrations();
 }
 
-init();
+void init();
