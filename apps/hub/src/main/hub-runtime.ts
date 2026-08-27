@@ -236,6 +236,9 @@ export class HubRuntime extends EventEmitter {
   public async saveSettings(input: Record<string, string>): Promise<SettingsSaveResult> {
     this.lastRepositoriesWarning = null;
     const entries: Record<string, string> = { ...input };
+    // Git 저장소 탭에서 명시적으로 전체 삭제했는지 여부 (그 외 경로는 빈 목록으로 저장소를 덮어쓰지 않는다).
+    const explicitRepositoryClear = entries.HUB_GIT_REPOSITORIES_CLEAR === "1";
+    delete entries.HUB_GIT_REPOSITORIES_CLEAR;
     // 일반 사용자는 08:00 자동화 설정을 변경할 수 없습니다.
     if (this.role !== "admin") {
       delete entries.HUB_DAILY_AUTOMATION_ENABLED;
@@ -311,7 +314,17 @@ export class HubRuntime extends EventEmitter {
             (error instanceof Error ? error.message : String(error));
         }
       } else {
-        updates.HUB_GIT_REPOSITORIES = "";
+        if (explicitRepositoryClear) {
+          updates.HUB_GIT_REPOSITORIES = "";
+        } else {
+          // 저장소 목록을 비우지 않고 기존 값을 유지합니다 (정책: Git 탭에서만 삭제 가능).
+          delete updates.HUB_GIT_REPOSITORIES;
+          const currentRepos = current.get("HUB_GIT_REPOSITORIES")?.trim();
+          if (currentRepos) {
+            this.lastRepositoriesWarning =
+              "저장소 목록은 Git 저장소 탭에서만 삭제할 수 있습니다. 기존 저장소를 유지합니다.";
+          }
+        }
       }
     }
     const next = await writeEnvFile(this.config.envFile, updates);

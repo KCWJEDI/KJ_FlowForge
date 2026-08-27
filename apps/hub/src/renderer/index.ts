@@ -2012,7 +2012,11 @@ async function saveDiscordSettings(): Promise<void> {
       discordChannelId: (state.discordRepositories[index]?.discordChannelId ?? draft.discordChannelId)?.trim() || undefined,
     }));
   try {
-    const result = await api.saveSettings({ HUB_GIT_REPOSITORIES: JSON.stringify(payload) });
+    const result = await api.saveSettings({
+      HUB_GIT_REPOSITORIES: JSON.stringify(payload),
+      // Git 저장소 탭에서 빈 목록으로 저장하면 명시적 삭제로 취급한다.
+      ...(payload.length === 0 ? { HUB_GIT_REPOSITORIES_CLEAR: "1" } : {}),
+    });
     state.settings = result.settings;
     state.settingsStatuses = result.statuses;
     $.settingsDiscordMessage.textContent = "Discord 저장소 설정이 저장되었습니다.";
