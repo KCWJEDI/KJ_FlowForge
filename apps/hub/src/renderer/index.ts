@@ -678,7 +678,23 @@ function renderGitBranches(): void {
   placeholder.value = "";
   placeholder.textContent = "작업 브랜치 선택…";
   select.appendChild(placeholder);
-  appendBranchOptions(select, state.gitBranches);
+  appendBranchOptions(select, state.gitBranches.filter((branch) => !state.gitWorkBranches.includes(branch)));
+  const syncGitActiveBranch = async (): Promise<void> => {
+    const active = state.gitActiveBranches.filter((branch) => branch.trim().length > 0);
+    if (active.length === 0) return;
+    const target = active[0]!;
+    if (state.git && state.git.branch === target) return;
+    state.gitBusy = true;
+    try {
+      state.git = await window.hub.switchGitBranch({ repository: selectedRepository(), branch: target });
+      await refreshGit();
+    } catch (error) {
+      setGitError(error instanceof Error ? error.message : String(error));
+      renderGitBranches();
+    } finally {
+      state.gitBusy = false;
+    }
+  };
   select.addEventListener("change", async () => {
     const branch = select.value;
     select.value = "";
@@ -688,16 +704,7 @@ function renderGitBranches(): void {
     persistGitWorkBranches();
     persistGitActiveBranches();
     renderGitBranches();
-    state.gitBusy = true;
-    try {
-      state.git = await window.hub.switchGitBranch({ repository: selectedRepository(), branch });
-      await refreshGit();
-    } catch (error) {
-      setGitError(error instanceof Error ? error.message : String(error));
-      renderGitBranches();
-    } finally {
-      state.gitBusy = false;
-    }
+    await syncGitActiveBranch();
   });
   $.gitBranches.appendChild(select);
   const allRow = document.createElement("label");
@@ -711,6 +718,7 @@ function renderGitBranches(): void {
     persistGitActiveBranches();
     renderGitBranches();
     updateGitButtons();
+    void syncGitActiveBranch();
   });
   const allText = document.createElement("span");
   allText.textContent = "전체 선택";
@@ -736,6 +744,8 @@ function renderGitBranches(): void {
       }
       persistGitActiveBranches();
       renderGitBranches();
+      updateGitButtons();
+      void syncGitActiveBranch();
     });
     const text = document.createElement("span");
     text.textContent = branch;
@@ -904,7 +914,10 @@ function addDashboardGitCard(initialPath?: string): void {
           catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
         },
         onChange: (list) => saveCardBranches(select.value, list),
-        onActiveChange: (active) => saveCardActiveBranches(select.value, active),
+        onActiveChange: (active) => {
+          saveCardActiveBranches(select.value, active);
+          void render();
+        },
       });
       const body = table.tBodies[0]!;
       body.innerHTML = "";
@@ -1023,14 +1036,15 @@ function buildWorkBranchPicker(options: {
   placeholder.value = "";
   placeholder.textContent = "작업 브랜치 선택…";
   select.appendChild(placeholder);
-  appendBranchOptions(select, names);
+  appendBranchOptions(select, names.filter((branch) => !workBranches.includes(branch)));
   select.addEventListener("change", () => {
     const branch = select.value;
     select.value = "";
     if (!branch || workBranches.includes(branch)) return;
     workBranches.push(branch);
     if (!activeBranches.includes(branch)) activeBranches.push(branch);
-    void onSwitch(branch);
+    const target = activeBranches.length > 0 ? activeBranches[0]! : branch;
+    void onSwitch(target);
     renderChips();
     onChange?.(workBranches.slice());
     onActiveChange?.(activeBranches.slice());
@@ -1047,6 +1061,7 @@ function buildWorkBranchPicker(options: {
     renderChips();
     updateAllInput();
     onActiveChange?.(activeBranches.slice());
+    if (activeBranches.length > 0) void onSwitch(activeBranches[0]!);
   });
   const allText = document.createElement("span");
   allText.textContent = "전체 선택";
@@ -1084,6 +1099,7 @@ function buildWorkBranchPicker(options: {
         }
         renderChips();
         onActiveChange?.(activeBranches.slice());
+        if (activeBranches.length > 0) void onSwitch(activeBranches[0]!);
       });
       const text = document.createElement("span");
       text.textContent = branch;

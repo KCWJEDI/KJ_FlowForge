@@ -388,8 +388,8 @@ details pre {
   width: 100%;
   min-width: 200px;
   max-width: 360px;
-  height: 30px;
-  overflow: hidden;
+  height: auto;
+  padding: 7px 10px;
 }
 
 .branch-option .chip-remove {
@@ -546,6 +546,21 @@ details pre {
 
 .dashboard-git-grid {
   align-items: stretch;
+}
+
+.dashboard-git-grid .card {
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent),
+    0 0 14px color-mix(in srgb, var(--accent) 35%, transparent),
+    0 0 30px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.dashboard-git-grid .card:focus-within,
+.dashboard-git-grid .card:has(.branch-option.active) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent),
+    0 0 16px color-mix(in srgb, var(--accent) 60%, transparent),
+    0 0 34px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
 .dashboard-add-card {
