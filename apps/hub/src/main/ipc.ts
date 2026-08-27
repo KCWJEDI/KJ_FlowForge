@@ -68,7 +68,9 @@ export function registerLicenseIpc(getLicenseService?: () => LicenseService | nu
       if (result.status === "blocked") throw new Error("사용이 중지된 라이선스입니다.");
       throw new Error("유효하지 않은 라이선스 키입니다.");
     }
-    app.relaunch();
+    const portableExecutable = process.env.PORTABLE_EXECUTABLE_FILE;
+    if (portableExecutable) app.relaunch({ execPath: portableExecutable, args: [] });
+    else app.relaunch();
     setTimeout(() => app.exit(0), 500);
     return { activated: true, keyId: result.keyId, owner: result.owner, role: result.role };
   });
