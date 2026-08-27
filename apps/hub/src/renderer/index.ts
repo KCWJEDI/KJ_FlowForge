@@ -96,11 +96,15 @@ const $ = {
 let neonFocusedCard: HTMLElement | null = null;
 
 function trackCardFocus(card: HTMLElement): void {
-  card.addEventListener("focusin", () => {
+  const engage = (): void => {
     if (neonFocusedCard && neonFocusedCard !== card) neonFocusedCard.classList.remove("neon");
     neonFocusedCard = card;
     card.classList.add("neon");
-  });
+  };
+  card.addEventListener("focusin", engage);
+  // 카드 내부 어디를 클릭/누르더라도 포커스가 잡히게 한다.
+  card.addEventListener("mousedown", engage);
+  card.addEventListener("pointerdown", engage);
 }
 
 const state: {
@@ -922,7 +926,6 @@ function addDashboardGitCard(initialPath?: string): void {
         container: branches,
         names,
         current: git.branch,
-        empty: currentCardBranches(select.value).length === 0,
         selected: currentCardBranches(select.value),
         active: currentCardActiveBranches(select.value),
         onSwitch: async (branch) => {
@@ -1030,20 +1033,20 @@ function buildWorkBranchPicker(options: {
   current: string;
   selected?: string[];
   active?: string[];
-  empty?: boolean;
   onActiveChange?: (active: string[]) => void;
   onSwitch: (branch: string) => Promise<void>;
   onChange?: (branches: string[]) => void;
 }): void {
   const { container, names, current, onSwitch, onChange, onActiveChange } = options;
   container.innerHTML = "";
-  const seed = options.empty ? [] : (options.selected && options.selected.length > 0 ? options.selected : [current]);
+  // 저장된 값(빈 배열 포함)이 전달되면 그대로 사용하고, 없을 때만 현재 브랜치로 채운다.
+  const seed = Array.isArray(options.selected) ? options.selected : [current];
   const workBranches: string[] = [];
   for (const branch of seed) {
     if (!workBranches.includes(branch)) workBranches.push(branch);
   }
   const activeBranches: string[] = [];
-  const seedActive = options.empty ? [] : (options.active && options.active.length > 0 ? options.active : seed);
+  const seedActive = Array.isArray(options.active) ? options.active : seed;
   for (const branch of seedActive) {
     if (workBranches.includes(branch) && !activeBranches.includes(branch)) activeBranches.push(branch);
   }
