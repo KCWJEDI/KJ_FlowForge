@@ -384,10 +384,11 @@ details pre {
 }
 
 .branch-select {
-  flex: 1 1 220px;
+  flex: 0 1 auto;
+  width: 100%;
   min-width: 200px;
   max-width: 360px;
-  height: 32px;
+  height: 30px;
   overflow: hidden;
 }
 
