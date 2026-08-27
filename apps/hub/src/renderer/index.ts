@@ -311,7 +311,8 @@ function restoreProjectActiveBranches(): void {
   if (saved && saved.length > 0) {
     state.gitActiveBranches = saved.slice();
   } else {
-    state.gitActiveBranches = state.gitWorkBranches.slice();
+    // 저장된 활성 브랜치가 없으면 빈 상태로 시작해 전체 선택이 자동으로 켜지지 않게 한다.
+    state.gitActiveBranches = [];
   }
 }
 
@@ -333,7 +334,8 @@ async function refreshGit(): Promise<void> {
       if (saved.length > 0) {
         state.gitWorkBranches = saved;
       } else {
-        state.gitWorkBranches = [state.git.branch];
+        // 기존 저장된 작업 브랜치가 없으면 자동으로 채우지 않는다.
+        state.gitWorkBranches = [];
       }
     }
     renderGit();

@@ -233,18 +233,18 @@ button.ghost {
   color: var(--text);
 }
 
-.push-button {
+button.push-button {
   background: #ffc966;
   border: 1px solid #ffb84d;
   color: #4d3600;
   font-weight: 600;
 }
 
-.push-button:hover {
+button.push-button:hover {
   filter: brightness(1.05);
 }
 
-.push-button:disabled {
+button.push-button:disabled {
   background: #ffc966;
   color: #4d3600;
   opacity: 0.45;
