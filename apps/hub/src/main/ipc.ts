@@ -20,6 +20,13 @@ const notionDatabaseSchema = z.object({
   repository: z.string().optional(),
   databaseId: z.string().max(128),
 });
+const manualDailyReportSchema = z.object({
+  date: z.string().min(1),
+  sinceIso: z.string().min(1),
+  untilIso: z.string().min(1),
+  repositories: z.array(z.string().min(1)).min(1),
+  branches: z.array(z.string().min(1)).min(1),
+});
 
 async function startHubAfterActivation(): Promise<void> {
   const mainModule = await import("./index.js");
@@ -109,6 +116,10 @@ export function registerIpc(
   });
   ipcMain.handle("hub:get-daily-automation", () => runtime.getDailyAutomation());
   ipcMain.handle("hub:run-daily-automation", () => runtime.runDailyAutomation());
+  ipcMain.handle("hub:report-manual-daily-report", (_event, raw: unknown) => {
+    const input = manualDailyReportSchema.parse(raw);
+    return runtime.reportManualDailyReport(input);
+  });
   ipcMain.handle("hub:choose-git-repository", async () => {
     const window = getWindow();
     const options = {
@@ -147,6 +158,7 @@ export function registerIpc(
       "hub:git-push",
       "hub:get-daily-automation",
       "hub:run-daily-automation",
+      "hub:report-manual-daily-report",
       "hub:choose-git-repository",
       "hub:list-git-remote-branches",
       "hub:get-settings",

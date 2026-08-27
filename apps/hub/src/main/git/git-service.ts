@@ -39,6 +39,15 @@ export interface GitBranchCaptureResult {
   commits: GitCommitSummary[];
 }
 
+export interface GitTimeCaptureInput {
+  repository: string;
+  branch: string;
+  /** 비교 시작 임계(포함). 예: 전날 08:00 ISO 문자열 */
+  sinceIso: string;
+  /** 비교 종료 임계(미포함). 예: 당일 08:00 ISO 문자열 */
+  untilIso: string;
+}
+
 export interface GitChangeSummary {
   oldHead: string | null;
   newHead: string;
@@ -204,7 +213,24 @@ export class GitService {
     };
   }
 
-  public async getRepositoryIdentity(repository: string): Promise<GitRepositoryIdentity> {
+  /** 특정 시간 범위(이전 08시 ~ 당일 08시)의 커밋만 수집합니다. */
+  public async captureBranchCommitsInTimeRange(
+    input: GitTimeCaptureInput,
+  ): Promise<GitBranchCaptureResult> {
+    const root = await this.root(input.repository);
+    const currentHead = await this.getBranchHead(root, input.branch);
+    if (!currentHead) throw new Error("Branch '" + input.branch + "' has no local commit");
+    const commits = await this.readCommitsInTimeRange(root, input.branch, input.sinceIso, input.untilIso);
+    return {
+      repository: root,
+      branch: input.branch,
+      previousHead: null,
+      currentHead,
+      commits,
+    };
+  }
+
+ public async getRepositoryIdentity(repository: string): Promise<GitRepositoryIdentity> {
     const root = await this.root(repository);
     const commonDirectory = await this.commonDirectory(root);
     const originUrl = (await this.git(root, ["remote", "get-url", "origin"], true)).trim();
@@ -333,9 +359,41 @@ export class GitService {
     }
   }
 
-  private async readCommits(root: string, revisions: string[]): Promise<GitCommitSummary[]> {
+ private async readCommits(root: string, revisions: string[]): Promise<GitCommitSummary[]> {
+   const format = "%H%x01%an%x01%aI%x01%s%x01%b%x02";
+   const raw = await this.git(root, ["log", `--format=${format}`, ...revisions], true);
+   const commits: GitCommitSummary[] = [];
+   for (const record of raw.split("\u0002")) {
+     const parts = record.replace(/^\r?\n/, "").split("\u0001");
+     if (parts.length < 4) continue;
+     commits.push({
+       hash: parts[0]!.trim(),
+       author: parts[1]!,
+       timestamp: parts[2]!,
+       subject: parts[3]!,
+       body: parts.slice(4).join("\u0001").trim(),
+     });
+   }
+   return commits;
+ }
+
+  /** 브랜치의 특정 시간 구간(이전 08시 ~ 당일 08시)에 커밋된 변경사항을 수집합니다. */
+  private async readCommitsInTimeRange(
+    root: string,
+    branch: string,
+    sinceIso: string,
+    untilIso: string,
+  ): Promise<GitCommitSummary[]> {
+    validateRef(branch);
     const format = "%H%x01%an%x01%aI%x01%s%x01%b%x02";
-    const raw = await this.git(root, ["log", `--format=${format}`, ...revisions], true);
+    const args = [
+      "log",
+      `--format=${format}`,
+      `--since=${sinceIso}`,
+      `--until=${untilIso}`,
+      branch,
+    ];
+    const raw = await this.git(root, args, true);
     const commits: GitCommitSummary[] = [];
     for (const record of raw.split("\u0002")) {
       const parts = record.replace(/^\r?\n/, "").split("\u0001");
@@ -350,7 +408,6 @@ export class GitService {
     }
     return commits;
   }
-
   private async git(cwd: string, args: string[], allowFailure = false): Promise<string> {
     try {
       const result = await execFileAsync("git", args, {

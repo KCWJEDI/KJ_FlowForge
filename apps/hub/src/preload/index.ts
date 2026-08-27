@@ -12,6 +12,7 @@ const api: HubApi = {
   gitPush: (args) => ipcRenderer.invoke("hub:git-push", args),
   getDailyAutomation: () => ipcRenderer.invoke("hub:get-daily-automation"),
   runDailyAutomation: () => ipcRenderer.invoke("hub:run-daily-automation"),
+  reportManualDailyReport: (args) => ipcRenderer.invoke("hub:report-manual-daily-report", args),
   chooseGitRepository: () => ipcRenderer.invoke("hub:choose-git-repository"),
   listGitRemoteBranches: (url) => ipcRenderer.invoke("hub:list-git-remote-branches", url),
   getSettings: () => ipcRenderer.invoke("hub:get-settings"),

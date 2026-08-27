@@ -1,7 +1,13 @@
 import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { DailyAutomationRunView, DailyAutomationView } from "../../shared/ipc";
+import type {
+  DailyAutomationRunView,
+  DailyAutomationView,
+  ManualDailyReportBranchResult,
+  ManualDailyReportInput,
+  ManualDailyReportResult,
+} from "../../shared/ipc";
 import type { HubConfig } from "../config";
 import { GitService, normalizeRemoteIdentity, type GitCommitSummary, type GitRepositoryIdentity } from "../git/git-service";
 import { NotionAdapter, type DailyWorkReportBranch } from "../integrations/notion-adapter";
@@ -157,6 +163,81 @@ export class DailyAutomation {
     });
     this.options.onChanged();
     return this.activeRun;
+  }
+
+  /** 이전 08시~당일 08시 커밋을 선택된 브랜치별로 수집해 각각 Notion에 등록하고 Discord로 1건 알림합니다. */
+  public async reportManualCommits(input: ManualDailyReportInput): Promise<ManualDailyReportResult> {
+    const result: ManualDailyReportResult = { date: input.date, branches: [] };
+    const repositorySettings = this.options.config.repositories.filter((item) =>
+      input.repositories.includes(item.path),
+    );
+    if (repositorySettings.length === 0) throw new Error("선택된 저장소가 설정에 없습니다.");
+    if (!this.options.notion.enabled) throw new Error("Notion integration is not configured");
+
+    const workBranches = new Map<string, DailyWorkReportBranch>();
+    for (const repositorySetting of repositorySettings) {
+      await this.options.git.validateRepository(repositorySetting.path);
+      for (const branch of input.branches) {
+        const node: ManualDailyReportBranchResult = {
+          repositoryLabel: repositorySetting.label,
+          branch,
+          status: "succeeded",
+          commitCount: 0,
+          message: "",
+        };
+        try {
+          const capture = await this.options.git.captureBranchCommitsInTimeRange({
+            repository: repositorySetting.path,
+            branch,
+            sinceIso: input.sinceIso,
+            untilIso: input.untilIso,
+          });
+          node.commitCount = capture.commits.length;
+          const workBranch = buildDailyWorkBranch({
+            repositoryLabel: repositorySetting.label,
+            stateKey: `manual|${repositorySetting.path}|${branch}`,
+            notionDatabaseId: repositorySetting.notionDatabaseId,
+            project: repositorySetting.project,
+            repository: repositorySetting.path,
+            branch,
+            previousHead: null,
+            currentHead: capture.currentHead,
+            commits: capture.commits,
+          });
+          workBranches.set(repositorySetting.label + "|" + branch, workBranch);
+          const pageId = await this.options.notion.createDailyWorkReport({
+            date: input.date,
+            reportKey: `manual|${input.date}|${repositorySetting.path}|${branch}`,
+            repositoryDatabaseId: repositorySetting.notionDatabaseId,
+            branches: [workBranch],
+          });
+          node.notionPageId = pageId;
+          node.reported = true;
+          node.message = capture.commits.length > 0
+            ? `커밋 ${capture.commits.length}개 요약을 Notion에 등록했습니다.`
+            : "해당 시간대에 새 커밋이 없습니다. 날짜만 표시됩니다.";
+        } catch (error) {
+          node.status = "failed";
+          node.message = error instanceof Error ? error.message : String(error);
+        }
+        result.branches.push(node);
+      }
+    }
+
+    if (this.options.discord?.enabled) {
+      try {
+        const discBranches = Array.from(workBranches.values());
+        const filtered = filterDiscordBranches(discBranches, this.options.config.repositories);
+        if (filtered.length > 0) {
+          await this.options.discord.sendMessage(
+            buildManualDiscordSummary(input.date, filtered, result.branches),
+          );
+        }
+      } catch (error) {
+        result.discordError = error instanceof Error ? error.message : String(error);
+      }
+    }
+    return result;
   }
 
   private async execute(trigger: DailyAutomationRunView["trigger"]): Promise<DailyAutomationRunView> {
@@ -518,6 +599,43 @@ function buildDiscordDailySummary(
   if (reportPageId) {
     lines.push(`Notion 페이지: ${reportPageId.replace(/-/g, "")}`);
   }
+  return lines.join("\n");
+}
+
+function buildManualDiscordSummary(
+  date: string,
+  branches: DailyWorkReportBranch[],
+  nodes: ManualDailyReportBranchResult[],
+): string {
+  const lines: string[] = [];
+  lines.push(`일일작업 요약 등록 · ${date}`);
+  if (branches.length === 0) {
+    lines.push("등록할 브랜치가 없습니다.");
+  }
+  let totalCommits = 0;
+  for (const branch of branches) {
+    totalCommits += branch.commits.length;
+    const heading = branch.branchLabel || branch.repositoryLabel
+      ? `[${branch.branchLabel ? branch.branchLabel : `분야: ${branch.repositoryLabel}`}] 브랜치 ${branch.branch}`
+      : `브랜치 ${branch.branch}`;
+    lines.push("", `**${heading}**`, `담당: ${branch.author || "Unknown"}`);
+    if (branch.commits.length === 0) {
+      lines.push("새 커밋 없음 - 날짜만 등록");
+    } else {
+      lines.push(`커밋 ${branch.commits.length}개 요약 등록 완료`);
+      for (const commit of branch.commits.slice(0, 8)) {
+        lines.push(`- [${commit.hash.slice(0, 8)}] ${commit.subject}`);
+      }
+      if (branch.commits.length > 8) {
+        lines.push(`…외 ${branch.commits.length - 8}개 커밋`);
+      }
+    }
+    const node = nodes.find((item) => item.branch === branch.branch && item.repositoryLabel === branch.repositoryLabel);
+    if (node?.notionPageId) {
+      lines.push(`Notion: ${node.notionPageId.replace(/-/g, "")}`);
+    }
+  }
+  lines.push("", `총 커밋: ${totalCommits}개 · 등록 브랜치 ${branches.length}개`);
   return lines.join("\n");
 }
 

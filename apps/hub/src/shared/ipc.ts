@@ -50,6 +50,35 @@ export interface DailyAutomationRunView {
   error?: string;
 }
 
+export interface ManualDailyReportBranchResult {
+  repositoryLabel: string;
+  branch: string;
+  status: "succeeded" | "failed";
+  commitCount: number;
+  message: string;
+  notionPageId?: string;
+  reported?: boolean;
+}
+
+export interface ManualDailyReportInput {
+  /** 보고 날짜(YYYY-MM-DD) */
+  date: string;
+  /** 비교 시작 임계(포함), 예: 전날 08시 ISO 문자열 */
+  sinceIso: string;
+  /** 비교 종료 임계(미포함), 예: 당일 08시 ISO 문자열 */
+  untilIso: string;
+  /** 처리할 저장소 경로 목록 */
+  repositories: string[];
+  /** 처리할 작업 브랜치 목록 */
+  branches: string[];
+}
+
+export interface ManualDailyReportResult {
+  date: string;
+  branches: ManualDailyReportBranchResult[];
+  discordError?: string;
+}
+
 export interface DailyAutomationView {
   enabled: boolean;
   selectedProjects: string[];
@@ -159,6 +188,7 @@ export interface HubApi {
   gitPush(args: { repository?: string }): Promise<GitStatusView>;
   getDailyAutomation(): Promise<DailyAutomationView>;
   runDailyAutomation(): Promise<DailyAutomationRunView>;
+  reportManualDailyReport(args: ManualDailyReportInput): Promise<ManualDailyReportResult>;
   chooseGitRepository(): Promise<string | null>;
   listGitRemoteBranches(url: string): Promise<string[]>;
   getSettings(): Promise<SettingsView>;

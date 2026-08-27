@@ -6,6 +6,8 @@ import type {
   GitStatusView,
   IntegrationConnectionStatus,
   LicenseRole,
+  ManualDailyReportInput,
+  ManualDailyReportResult,
   SettingsSaveResult,
   SettingsView,
 } from "../shared/ipc";
@@ -80,6 +82,10 @@ export class HubRuntime extends EventEmitter {
       throw new Error("관리자 라이선스가 필요합니다. 자동 일일작업 등록은 관리자만 사용할 수 있습니다.");
     }
     return this.dailyAutomation.run("manual");
+  }
+
+  public reportManualDailyReport(input: ManualDailyReportInput): Promise<ManualDailyReportResult> {
+    return this.dailyAutomation.reportManualCommits(input);
   }
 
   public async inspectGit(repository?: string): Promise<GitStatusView> {

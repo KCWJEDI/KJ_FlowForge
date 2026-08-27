@@ -32,6 +32,7 @@ const $ = {
   gitFiles: required<HTMLTableElement>(document.getElementById("git-files"), "git-files"),
   gitCommit: required<HTMLButtonElement>(document.getElementById("git-commit"), "git-commit"),
   gitPush: required<HTMLButtonElement>(document.getElementById("git-push"), "git-push"),
+  gitDailyReport: required<HTMLButtonElement>(document.getElementById("git-daily-report"), "git-daily-report"),
   gitError: required<HTMLElement>(document.getElementById("git-error"), "git-error"),
   statusBar: required<HTMLElement>(document.getElementById("status-bar-text"), "status-bar-text"),
   automationSection: required<HTMLElement>(document.getElementById("automation-section"), "automation-section"),
@@ -92,6 +93,9 @@ const state: {
   gitBusy: boolean;
   gitBranches: string[];
   gitWorkBranches: string[];
+  gitWorkBranchesProject: string;
+  gitWorkBranchesByProject: Record<string, string[]>;
+  gitCardsByProject: Record<string, Array<{ path: string; workBranches: string[] }>>;
   settings: SettingsView | null;
   settingsStatuses: IntegrationConnectionStatus[];
   settingsBusy: boolean;
@@ -109,6 +113,9 @@ const state: {
   gitBusy: false,
   gitBranches: [],
   gitWorkBranches: [],
+  gitWorkBranchesProject: "",
+  gitWorkBranchesByProject: {},
+  gitCardsByProject: {},
   settings: null,
   settingsStatuses: [],
   settingsBusy: false,
@@ -208,6 +215,23 @@ function selectedRepository(): string | undefined {
   return value || undefined;
 }
 
+function persistGitWorkBranches(): void {
+  const project = $.dashboardProject.value || "";
+  state.gitWorkBranchesByProject[project] = state.gitWorkBranches.slice();
+}
+
+function currentlySelectedProject(): string {
+  return $.dashboardProject.value || "";
+}
+
+function restoreProjectWorkBranches(): void {
+  const project = currentlySelectedProject();
+  const saved = state.gitWorkBranchesByProject[project];
+  if (saved && saved.length > 0) {
+    state.gitWorkBranches = saved.slice();
+  }
+}
+
 async function refreshGit(): Promise<void> {
   setGitError("");
   state.gitBusy = true;
@@ -222,7 +246,13 @@ async function refreshGit(): Promise<void> {
       window.hub.listGitBranches(repository),
     ]);
     if (state.git && state.git.branch && !state.gitWorkBranches.includes(state.git.branch)) {
-      state.gitWorkBranches = [state.git.branch];
+      const project = $.dashboardProject.value || "";
+      const saved = state.gitWorkBranchesByProject[project] ?? [];
+      if (saved.length > 0) {
+        state.gitWorkBranches = saved;
+      } else {
+        state.gitWorkBranches = [state.git.branch];
+      }
     }
     renderGit();
   } catch (error) {
@@ -293,12 +323,15 @@ function updateGitButtons(): void {
   if (state.gitBusy) {
     $.gitCommit.disabled = true;
     $.gitPush.disabled = true;
+    $.gitDailyReport.disabled = true;
     return;
   }
   const hasRepo = Boolean(selectedRepository());
   const hasChanges = state.git !== null && !state.git.clean;
+  const hasBranches = state.gitWorkBranches.length > 0;
   $.gitCommit.disabled = !hasRepo || !hasChanges;
   $.gitPush.disabled = !hasRepo;
+  $.gitDailyReport.disabled = !hasRepo || !hasBranches;
 }
 
 async function runGitCommit(): Promise<void> {
@@ -346,6 +379,67 @@ async function runGitPush(): Promise<void> {
   } finally {
     state.gitBusy = false;
     updateGitButtons();
+  }
+}
+
+function previousEightIso() {
+  const now = new Date();
+  const todayEight = new Date(now);
+  todayEight.setHours(8, 0, 0, 0);
+  if (now.getTime() < todayEight.getTime()) {
+    todayEight.setDate(todayEight.getDate() - 1);
+  }
+  const until = new Date(todayEight);
+  const since = new Date(todayEight);
+  since.setDate(since.getDate() - 1);
+  const month = String(todayEight.getMonth() + 1).padStart(2, "0");
+  const day = String(todayEight.getDate()).padStart(2, "0");
+  return {
+    date: todayEight.getFullYear() + "-" + month + "-" + day,
+    sinceIso: since.toISOString(),
+    untilIso: until.toISOString(),
+  };
+}
+
+async function runGitDailyReport() {
+  setGitError("");
+  const repo = selectedRepository();
+  if (!repo) {
+    setGitError("저장소를 선택하세요.");
+    return;
+  }
+  const branches = state.gitWorkBranches.filter((branch) => branch.trim().length > 0);
+  if (branches.length === 0) {
+    setGitError("작업 브랜치를 하나 이상 선택하세요.");
+    return;
+  }
+  state.gitBusy = true;
+  $.gitCommit.disabled = true;
+  $.gitPush.disabled = true;
+  $.gitDailyReport.disabled = true;
+  const range = previousEightIso();
+  setStatus("전날 08시~당일 08시 커밋을 브랜치별로 요약해 Notion에 등록하는 중…");
+  try {
+    const result = await window.hub.reportManualDailyReport({
+      date: range.date,
+      sinceIso: range.sinceIso,
+      untilIso: range.untilIso,
+      repositories: [repo],
+      branches,
+    });
+    const failed = result.branches.filter((item) => item.status === "failed");
+    if (failed.length > 0) {
+      setGitError(failed.map((item) => item.repositoryLabel + "/" + item.branch + ": " + item.message).join("\n"));
+    } else {
+      setStatus(range.date + " 일일 요약 등록 완료 (브랜치 " + result.branches.length + "개)");
+    }
+  } catch (error) {
+    setGitError(error instanceof Error ? error.message : String(error));
+    setStatus("일일 요약 등록 실패");
+  } finally {
+    state.gitBusy = false;
+    updateGitButtons();
+    $.gitDailyReport.disabled = false;
   }
 }
 
@@ -480,6 +574,7 @@ function renderGitBranches(): void {
     select.value = "";
     if (!branch || state.gitWorkBranches.includes(branch)) return;
     state.gitWorkBranches.push(branch);
+    persistGitWorkBranches();
     renderGitBranches();
     state.gitBusy = true;
     try {
@@ -502,6 +597,7 @@ function renderGitBranches(): void {
     label.title = "브랜치 삭제";
     label.addEventListener("click", () => {
       state.gitWorkBranches = state.gitWorkBranches.filter((value) => value !== branch);
+      persistGitWorkBranches();
       renderGitBranches();
     });
     const remove = document.createElement("button");
@@ -512,6 +608,7 @@ function renderGitBranches(): void {
     remove.addEventListener("click", (event) => {
       event.stopPropagation();
       state.gitWorkBranches = state.gitWorkBranches.filter((value) => value !== branch);
+      persistGitWorkBranches();
       renderGitBranches();
     });
     label.appendChild(remove);
@@ -557,6 +654,24 @@ function projectName(value?: string): string {
   return value?.trim() || "미지정 프로젝트";
 }
 
+function currentCardBranches(path: string): string[] {
+  const project = currentlySelectedProject();
+  const cards = state.gitCardsByProject[project] ?? [];
+  const found = cards.find((item) => item.path === path);
+  return found ? found.workBranches.slice() : [];
+}
+
+function saveCardBranches(path: string, branches: string[]): void {
+  const project = currentlySelectedProject();
+  const cards = state.gitCardsByProject[project] ?? [];
+  let found = cards.find((item) => item.path === path);
+  if (found) {
+    found.workBranches = branches.slice();
+  } else {
+    state.gitCardsByProject[project] = [...cards, { path, workBranches: branches.slice() }];
+  }
+}
+
 function projectNames(repositories: GitRepositorySetting[]): string[] {
   return [...new Set(repositories.map((repository) => projectName(repository.project)))].sort((a, b) => a.localeCompare(b));
 }
@@ -576,7 +691,7 @@ function renderProjectOptions(repositories: GitRepositorySetting[]): void {
   $.dashboardProjectRename.disabled = !$.dashboardProject.value;
 }
 
-function addDashboardGitCard(): void {
+function addDashboardGitCard(initialPath?: string): void {
   const project = $.dashboardProject.value;
   const repositories = (state.dashboard?.config.repositories ?? []).filter((item) => projectName(item.project) === project);
   if (repositories.length === 0) {
@@ -597,14 +712,18 @@ function addDashboardGitCard(): void {
   const buttons = card.querySelectorAll<HTMLButtonElement>(".row button");
   const commit = buttons[0]!;
   const push = buttons[1]!;
+  const report = buttons[2] as HTMLButtonElement | undefined;
   const error = card.querySelector<HTMLElement>(".error-text")!;
   select.innerHTML = "";
+  let preselected = "";
   for (const repository of repositories) {
     const option = document.createElement("option");
     option.value = repository.path;
     option.textContent = `${repository.label || "저장소"} · ${repository.username || "KCWJEDI"} · ${repository.path}`;
     select.appendChild(option);
+    if (initialPath && repository.path === initialPath) preselected = repository.path;
   }
+  if (preselected) select.value = preselected;
   const render = async (): Promise<void> => {
     error.textContent = "";
     try {
@@ -616,10 +735,12 @@ function addDashboardGitCard(): void {
         container: branches,
         names,
         current: git.branch,
+        selected: currentCardBranches(select.value),
         onSwitch: async (branch) => {
           try { await window.hub.switchGitBranch({ repository: select.value, branch }); await render(); }
           catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
         },
+        onChange: (list) => saveCardBranches(select.value, list),
       });
       const body = table.tBodies[0]!;
       body.innerHTML = "";
@@ -631,6 +752,7 @@ function addDashboardGitCard(): void {
       }
       commit.disabled = git.clean;
       push.disabled = false;
+      if (report) report.disabled = currentCardBranches(select.value).length === 0;
     } catch (cause) {
       error.textContent = cause instanceof Error ? cause.message : String(cause);
     }
@@ -645,25 +767,74 @@ function addDashboardGitCard(): void {
     try { await window.hub.gitPush({ repository: select.value }); await render(); }
     catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
   });
+  if (report) {
+    report.addEventListener("click", async () => {
+      try {
+        const branches = currentCardBranches(select.value);
+        if (branches.length === 0) {
+          error.textContent = "작업 브랜치를 하나 이상 선택하세요.";
+          return;
+        }
+        const range = previousEightIso();
+        const result = await window.hub.reportManualDailyReport({
+          date: range.date,
+          sinceIso: range.sinceIso,
+          untilIso: range.untilIso,
+          repositories: [select.value],
+          branches,
+        });
+        const failed = result.branches.filter((item) => item.status === "failed");
+        error.textContent = failed.map((item) => item.repositoryLabel + "/" + item.branch + ": " + item.message).join("\n");
+        if (failed.length === 0) setStatus(range.date + " 일일 요약 등록 완료 (브랜치 " + branches.length + "개)");
+      } catch (cause) {
+        error.textContent = cause instanceof Error ? cause.message : String(cause);
+      }
+    });
+  }
   const removeButton = document.createElement("button");
   removeButton.type = "button";
   removeButton.className = "ghost danger";
   removeButton.textContent = "카드 삭제";
-  removeButton.addEventListener("click", () => card.remove());
+  removeButton.addEventListener("click", () => {
+    const project = currentlySelectedProject();
+    const cards = state.gitCardsByProject[project] ?? [];
+    state.gitCardsByProject[project] = cards.filter((item) => item.path !== select.value);
+    card.remove();
+  });
   card.querySelector(".card-head")!.append(removeButton);
   $.dashboardAddCard.before(card);
   void render();
+}
+
+function restoreDashboardGitCards(): void {
+  const project = currentlySelectedProject();
+  const saved = state.gitCardsByProject[project];
+  if (!saved || saved.length === 0) return;
+  let added = 0;
+  for (let index = 0; index < Math.min(saved.length, 3); index += 1) {
+    const entry = saved[index];
+    if (!entry) continue;
+    addDashboardGitCard(entry.path);
+    added += 1;
+  }
+  if (added === 0) setStatus("저장된 Git 카드가 없습니다.");
 }
 
 function buildWorkBranchPicker(options: {
   container: HTMLElement;
   names: string[];
   current: string;
+  selected?: string[];
   onSwitch: (branch: string) => Promise<void>;
+  onChange?: (branches: string[]) => void;
 }): void {
-  const { container, names, current, onSwitch } = options;
+  const { container, names, current, onSwitch, onChange } = options;
   container.innerHTML = "";
-  const workBranches: string[] = [current];
+  const seed = (options.selected && options.selected.length > 0 ? options.selected : [current]);
+  const workBranches: string[] = [];
+  for (const branch of seed) {
+    if (!workBranches.includes(branch)) workBranches.push(branch);
+  }
   const select = document.createElement("select");
   select.className = "branch-select";
   const placeholder = document.createElement("option");
@@ -678,6 +849,7 @@ function buildWorkBranchPicker(options: {
     workBranches.push(branch);
     void onSwitch(branch);
     renderChips();
+    onChange?.(workBranches.slice());
   });
   container.appendChild(select);
   const chips = document.createElement("div");
@@ -707,6 +879,7 @@ function buildWorkBranchPicker(options: {
         const index = workBranches.indexOf(branch);
         if (index >= 0) workBranches.splice(index, 1);
         renderChips();
+        onChange?.(workBranches.slice());
       });
       label.appendChild(remove);
       chips.appendChild(label);
@@ -1481,13 +1654,16 @@ function bindEvents(): void {
   $.gitRepository.addEventListener("change", () => void refreshGit());
   $.gitCommit.addEventListener("click", () => void runGitCommit());
   $.gitPush.addEventListener("click", () => void runGitPush());
+  $.gitDailyReport.addEventListener("click", () => void runGitDailyReport());
   $.mainTabDashboard.addEventListener("click", () => switchMainPanel("dashboard"));
   $.mainTabAutomation.addEventListener("click", () => switchMainPanel("automation"));
   $.mainTabSettings.addEventListener("click", () => switchMainPanel("settings"));
   $.dashboardProject.addEventListener("change", () => {
     document.querySelectorAll(".dashboard-extra-card").forEach((card) => card.remove());
+    restoreProjectWorkBranches();
     renderGitRepositoryOptions();
     void refreshGit();
+    restoreDashboardGitCards();
   });
   $.dashboardProjectAdd.addEventListener("click", () => {
     const name = window.prompt("추가할 프로젝트 이름을 입력하세요.")?.trim();
@@ -1518,7 +1694,7 @@ function bindEvents(): void {
       setStatus(`프로젝트 이름 변경 실패: ${error instanceof Error ? error.message : String(error)}`);
     }
   });
-  $.dashboardAddCard.addEventListener("click", addDashboardGitCard);
+  $.dashboardAddCard.addEventListener("click", () => addDashboardGitCard());
   $.settingsTabEnv.addEventListener("click", () => switchSettingsPanel("env"));
   $.settingsTabGit.addEventListener("click", () => switchSettingsPanel("git"));
   $.settingsTabNotion.addEventListener("click", () => {
