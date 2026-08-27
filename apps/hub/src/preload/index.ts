@@ -18,6 +18,7 @@ const api: HubApi = {
   testNotionDatabase: (args) => ipcRenderer.invoke("hub:test-notion-database", args),
   getLicenseStatus: () => ipcRenderer.invoke("hub:get-license-status"),
   activateLicense: (key) => ipcRenderer.invoke("hub:activate-license", { key }),
+  replaceLicense: (key) => ipcRenderer.invoke("hub:replace-license", { key }),
   onStateChanged: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, state: DashboardState): void => listener(state);
     ipcRenderer.on("hub:state-changed", wrapped);

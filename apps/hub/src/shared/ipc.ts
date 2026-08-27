@@ -52,6 +52,7 @@ export interface DailyAutomationRunView {
 
 export interface DailyAutomationView {
   enabled: boolean;
+  selectedProjects: string[];
   repositories: Array<{
     label: string;
     username?: string;
@@ -164,5 +165,6 @@ export interface HubApi {
   testNotionDatabase(args: { repository?: string; databaseId: string }): Promise<{ ok: boolean; message: string }>;
   getLicenseStatus(): Promise<LicenseStatus>;
   activateLicense(key: string): Promise<LicenseStatus>;
+  replaceLicense(key: string): Promise<LicenseStatus>;
   onStateChanged(listener: (state: DashboardState) => void): () => void;
 }

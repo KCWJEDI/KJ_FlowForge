@@ -35,17 +35,25 @@ const $ = {
   statusBar: required<HTMLElement>(document.getElementById("status-bar-text"), "status-bar-text"),
   automationSection: required<HTMLElement>(document.getElementById("automation-section"), "automation-section"),
   mainTabDashboard: required<HTMLButtonElement>(document.getElementById("tab-dashboard"), "tab-dashboard"),
+  mainTabAutomation: required<HTMLButtonElement>(document.getElementById("tab-automation"), "tab-automation"),
   mainTabSettings: required<HTMLButtonElement>(document.getElementById("tab-settings"), "tab-settings"),
   panelDashboard: required<HTMLElement>(document.getElementById("panel-dashboard"), "panel-dashboard"),
+  panelAutomation: required<HTMLElement>(document.getElementById("panel-automation"), "panel-automation"),
   panelSettings: required<HTMLElement>(document.getElementById("panel-settings"), "panel-settings"),
+  dashboardProject: required<HTMLSelectElement>(document.getElementById("dashboard-project"), "dashboard-project"),
   settingsTabEnv: required<HTMLButtonElement>(document.getElementById("settings-tab-env"), "settings-tab-env"),
   settingsTabGit: required<HTMLButtonElement>(document.getElementById("settings-tab-git"), "settings-tab-git"),
   settingsTabNotion: required<HTMLButtonElement>(document.getElementById("settings-tab-notion"), "settings-tab-notion"),
   settingsTabStatus: required<HTMLButtonElement>(document.getElementById("settings-tab-status"), "settings-tab-status"),
+  settingsTabLicense: required<HTMLButtonElement>(document.getElementById("settings-tab-license"), "settings-tab-license"),
   settingsPaneEnv: required<HTMLElement>(document.getElementById("settings-pane-env"), "settings-pane-env"),
   settingsPaneGit: required<HTMLElement>(document.getElementById("settings-pane-git"), "settings-pane-git"),
   settingsPaneNotion: required<HTMLElement>(document.getElementById("settings-pane-notion"), "settings-pane-notion"),
   settingsPaneStatus: required<HTMLElement>(document.getElementById("settings-pane-status"), "settings-pane-status"),
+  settingsPaneLicense: required<HTMLElement>(document.getElementById("settings-pane-license"), "settings-pane-license"),
+  settingsLicenseKey: required<HTMLInputElement>(document.getElementById("settings-license-key"), "settings-license-key"),
+  settingsLicenseChange: required<HTMLButtonElement>(document.getElementById("settings-license-change"), "settings-license-change"),
+  settingsLicenseMessage: required<HTMLElement>(document.getElementById("settings-license-message"), "settings-license-message"),
   settingsEnvFile: required<HTMLElement>(document.getElementById("settings-env-file"), "settings-env-file"),
   settingsApiMissing: required<HTMLElement>(document.getElementById("settings-api-missing"), "settings-api-missing"),
   settingsForm: required<HTMLFormElement>(document.getElementById("settings-form"), "settings-form"),
@@ -66,7 +74,7 @@ const $ = {
   settingsTestStatus: required<HTMLButtonElement>(document.getElementById("settings-test-status"), "settings-test-status"),
   automationState: required<HTMLElement>(document.getElementById("automation-state"), "automation-state"),
   automationEnabled: required<HTMLInputElement>(document.getElementById("automation-enabled"), "automation-enabled"),
-  automationRepositories: required<HTMLElement>(document.getElementById("automation-repositories"), "automation-repositories"),
+  automationProjects: required<HTMLElement>(document.getElementById("automation-projects"), "automation-projects"),
   automationSave: required<HTMLButtonElement>(document.getElementById("automation-save"), "automation-save"),
   automationRun: required<HTMLButtonElement>(document.getElementById("automation-run"), "automation-run"),
   automationNext: required<HTMLElement>(document.getElementById("automation-next"), "automation-next"),
@@ -159,7 +167,8 @@ function renderHeader(dashboard: DashboardState): void {
 function renderGitRepositoryOptions(): void {
   const previous = $.gitRepository.value;
   $.gitRepository.innerHTML = "";
-  const repos = state.dashboard?.config.repositories ?? [];
+  const project = $.dashboardProject.value;
+  const repos = (state.dashboard?.config.repositories ?? []).filter((repo) => !project || projectName(repo.project) === project);
   if (repos.length === 0) {
     const option = document.createElement("option");
     option.value = "";
@@ -330,32 +339,24 @@ function renderDailyAutomation(view: DailyAutomationView): void {
     ? `다음 실행: ${formatTime(view.nextRunAt)}`
     : "다음 실행 없음";
 
-  $.automationRepositories.innerHTML = "";
-  if (view.repositories.length === 0) {
-    $.automationRepositories.innerHTML = '<p class="empty">설정된 저장소가 없습니다. 설정 탭에서 추가하세요.</p>';
+  $.automationProjects.innerHTML = "";
+  const projects = projectNames(state.dashboard?.config.repositories ?? []);
+  for (const project of projects) {
+    const label = document.createElement("label");
+    label.className = "checkbox-row repository-card readonly";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = view.selectedProjects.includes(project);
+    input.addEventListener("change", () => {
+      const selected = new Set(view.selectedProjects);
+      input.checked ? selected.add(project) : selected.delete(project);
+      view.selectedProjects = [...selected];
+      updateAutomationButtons(view);
+    });
+    label.append(input, document.createTextNode(project));
+    $.automationProjects.appendChild(label);
   }
-  for (const repo of view.repositories) {
-    const card = document.createElement("div");
-    card.className = "repository-card readonly";
-    const title = document.createElement("div");
-    title.className = "repository-card-head";
-    title.textContent = repo.label || "저장소";
-    const path = document.createElement("div");
-    path.className = "muted";
-    path.textContent = repo.path ?? repo.repositoryError ?? "";
-    const branches = document.createElement("div");
-    branches.className = "muted";
-    branches.textContent = `브랜치: ${repo.selectedBranches.join(", ") || "선택 없음"}`;
-    if (repo.repositoryError) {
-      const error = document.createElement("p");
-      error.className = "error-text";
-      error.textContent = repo.repositoryError;
-      card.append(title, error, path, branches);
-    } else {
-      card.append(title, path, branches);
-    }
-    $.automationRepositories.appendChild(card);
-  }
+  if (projects.length === 0) $.automationProjects.innerHTML = '<p class="empty">설정된 프로젝트가 없습니다.</p>';
 
   if (view.lastRun) {
     const run = view.lastRun;
@@ -372,24 +373,16 @@ function renderDailyAutomation(view: DailyAutomationView): void {
 }
 
 function updateAutomationButtons(view: DailyAutomationView): void {
-  const hasSelectedBranch = view.repositories.some((repo) => repo.selectedBranches.length > 0 && repo.path);
+  const hasSelectedBranch = view.selectedProjects.length > 0 && view.repositories.some((repo) => repo.selectedBranches.length > 0 && repo.path);
   $.automationRun.disabled = state.automationBusy || view.running || !hasSelectedBranch;
 }
 
 async function saveDailyAutomation(): Promise<void> {
   const api = settingsHub();
   if (!api || state.automationBusy) return;
-  const payload = state.repositoryDrafts
-    .filter((draft) => draft.path.trim().length > 0)
-      .map((draft) => ({
-        label: draft.label || "저장소",
-        path: draft.path.trim(),
-        branches: draft.branches,
-        discordMinCommits: draft.discordMinCommits ?? 0,
-        discordBranches: draft.discordBranches ?? [],
-      }));
-  if (payload.length === 0) {
-    $.automationMessageText.textContent = "최소 하나 이상의 저장소 폴터를 선택하세요.";
+  const projects = state.dashboard?.dailyAutomation.selectedProjects ?? [];
+  if (projects.length === 0) {
+    $.automationMessageText.textContent = "최소 하나 이상의 프로젝트를 선택하세요.";
     return;
   }
   state.automationBusy = true;
@@ -397,8 +390,8 @@ async function saveDailyAutomation(): Promise<void> {
   if (state.dashboard) renderDailyAutomation(state.dashboard.dailyAutomation);
   try {
     const result = await api.saveSettings({
-      HUB_GIT_REPOSITORIES: JSON.stringify(payload),
       HUB_DAILY_AUTOMATION_ENABLED: String($.automationEnabled.checked),
+      HUB_DAILY_AUTOMATION_PROJECTS: projects.join(","),
     });
     state.settings = result.settings;
     state.settingsStatuses = result.statuses;
@@ -443,11 +436,34 @@ async function refreshState(): Promise<void> {
 function renderDashboard(dashboard: DashboardState): void {
   state.dashboard = dashboard;
   renderHeader(dashboard);
-  // 08:00 전체 브랜치 자동화는 관리자 전용 카드입니다.
-  $.automationSection.hidden = dashboard.role !== "admin";
+  $.mainTabAutomation.hidden = dashboard.role !== "admin";
+  if (dashboard.role !== "admin" && !$.panelAutomation.hidden) switchMainPanel("dashboard");
+  renderProjectOptions(dashboard.config.repositories);
   renderGitRepositoryOptions();
   renderDailyAutomation(dashboard.dailyAutomation);
   renderSettingsNotion();
+}
+
+function projectName(value?: string): string {
+  return value?.trim() || "미지정 프로젝트";
+}
+
+function projectNames(repositories: GitRepositorySetting[]): string[] {
+  return [...new Set(repositories.map((repository) => projectName(repository.project)))].sort((a, b) => a.localeCompare(b));
+}
+
+function renderProjectOptions(repositories: GitRepositorySetting[]): void {
+  const previous = $.dashboardProject.value;
+  $.dashboardProject.innerHTML = "";
+  for (const project of projectNames(repositories)) {
+    const option = document.createElement("option");
+    option.value = project;
+    option.textContent = project;
+    $.dashboardProject.appendChild(option);
+  }
+  if (previous && Array.from($.dashboardProject.options).some((option) => option.value === previous)) {
+    $.dashboardProject.value = previous;
+  }
 }
 
 function formatTime(value: string): string {
@@ -485,29 +501,32 @@ function setSettingsBusy(busy: boolean): void {
   $.settingsTestStatus.disabled = busy;
 }
 
-function switchMainPanel(panel: "dashboard" | "settings"): void {
-  const isDashboard = panel === "dashboard";
-  $.panelDashboard.hidden = !isDashboard;
-  $.panelSettings.hidden = isDashboard;
-  $.mainTabDashboard.classList.toggle("active", isDashboard);
-  $.mainTabSettings.classList.toggle("active", !isDashboard);
-  if (isDashboard) {
+function switchMainPanel(panel: "dashboard" | "automation" | "settings"): void {
+  $.panelDashboard.hidden = panel !== "dashboard";
+  $.panelAutomation.hidden = panel !== "automation";
+  $.panelSettings.hidden = panel !== "settings";
+  $.mainTabDashboard.classList.toggle("active", panel === "dashboard");
+  $.mainTabAutomation.classList.toggle("active", panel === "automation");
+  $.mainTabSettings.classList.toggle("active", panel === "settings");
+  if (panel === "dashboard") {
     const repos = state.dashboard?.config.repositories ?? [];
     if (repos.length > 0) void refreshState();
-  } else if (state.settings === null) {
+  } else if (panel === "settings" && state.settings === null) {
     void refreshSettings();
   }
 }
 
-function switchSettingsPanel(panel: "env" | "git" | "notion" | "status"): void {
+function switchSettingsPanel(panel: "env" | "git" | "notion" | "status" | "license"): void {
   $.settingsPaneEnv.hidden = panel !== "env";
   $.settingsPaneGit.hidden = panel !== "git";
   $.settingsPaneNotion.hidden = panel !== "notion";
   $.settingsPaneStatus.hidden = panel !== "status";
+  $.settingsPaneLicense.hidden = panel !== "license";
   $.settingsTabEnv.classList.toggle("active", panel === "env");
   $.settingsTabGit.classList.toggle("active", panel === "git");
   $.settingsTabNotion.classList.toggle("active", panel === "notion");
   $.settingsTabStatus.classList.toggle("active", panel === "status");
+  $.settingsTabLicense.classList.toggle("active", panel === "license");
   if (panel === "status" && state.settingsStatuses.length === 0) {
     void performTestIntegrations();
   }
@@ -777,6 +796,20 @@ function buildSettingsRepositoryCard(index: number): HTMLElement {
   head.append(toggleButton, summary, removeButton);
   card.appendChild(head);
   card.appendChild(labelInput);
+
+  const projectLabel = document.createElement("label");
+  projectLabel.className = "repository-url-field";
+  projectLabel.textContent = "프로젝트 이름";
+  const projectInput = document.createElement("input");
+  projectInput.type = "text";
+  projectInput.placeholder = "예: DiceGambit";
+  projectInput.value = draft.project ?? "";
+  projectInput.addEventListener("input", () => {
+    const item = state.repositoryDrafts[index];
+    if (item) item.project = projectInput.value.trim();
+  });
+  projectLabel.appendChild(projectInput);
+  card.appendChild(projectLabel);
 
   const pathRow = document.createElement("div");
   pathRow.className = "repository-picker";
@@ -1269,7 +1302,9 @@ function bindEvents(): void {
   $.gitCommit.addEventListener("click", () => void runGitCommit());
   $.gitPush.addEventListener("click", () => void runGitPush());
   $.mainTabDashboard.addEventListener("click", () => switchMainPanel("dashboard"));
+  $.mainTabAutomation.addEventListener("click", () => switchMainPanel("automation"));
   $.mainTabSettings.addEventListener("click", () => switchMainPanel("settings"));
+  $.dashboardProject.addEventListener("change", () => { renderGitRepositoryOptions(); void refreshGit(); });
   $.settingsTabEnv.addEventListener("click", () => switchSettingsPanel("env"));
   $.settingsTabGit.addEventListener("click", () => switchSettingsPanel("git"));
   $.settingsTabNotion.addEventListener("click", () => {
@@ -1277,6 +1312,20 @@ function bindEvents(): void {
     renderSettingsNotion();
   });
   $.settingsTabStatus.addEventListener("click", () => switchSettingsPanel("status"));
+  $.settingsTabLicense.addEventListener("click", () => switchSettingsPanel("license"));
+  $.settingsLicenseChange.addEventListener("click", async () => {
+    const key = $.settingsLicenseKey.value.trim();
+    if (!key) { $.settingsLicenseMessage.textContent = "새 라이선스 키를 입력하세요."; return; }
+    $.settingsLicenseChange.disabled = true;
+    $.settingsLicenseMessage.textContent = "라이선스를 확인하는 중입니다…";
+    try {
+      await window.hub.replaceLicense(key);
+      $.settingsLicenseMessage.textContent = "라이선스가 변경되었습니다. 프로그램을 재시작합니다.";
+    } catch (error) {
+      $.settingsLicenseMessage.textContent = error instanceof Error ? error.message : String(error);
+      $.settingsLicenseChange.disabled = false;
+    }
+  });
   $.settingsTest.addEventListener("click", () => void performTestIntegrations());
   $.settingsTestStatus.addEventListener("click", () => void performTestIntegrations());
   $.settingsForm.addEventListener("submit", (event) => {

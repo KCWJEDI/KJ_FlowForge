@@ -14,6 +14,7 @@ const envSchema = z.object({
   HUB_GIT_REPOSITORIES: z.string().optional(),
   HUB_GIT_REPOSITORY: z.string().optional(),
   HUB_DAILY_AUTOMATION_ENABLED: z.string().optional(),
+  HUB_DAILY_AUTOMATION_PROJECTS: z.string().optional(),
   HUB_GIT_BRANCHES: z.string().optional(),
   DISCORD_BOT_TOKEN: z.string().optional(),
   DISCORD_CHANNEL_ID: z.string().optional(),
@@ -36,6 +37,7 @@ export interface HubConfig {
   sessionSecret: string;
   dailyAutomation: {
     enabled: boolean;
+    projects?: string[];
   };
   discord: { token?: string; channelId?: string };
   notion: { token?: string; databaseId?: string };
@@ -68,6 +70,7 @@ export async function loadConfig(dataDirectory: string, envFile: string): Promis
     sessionSecret,
     dailyAutomation: {
       enabled: /^(1|true|yes|on)$/i.test(env.HUB_DAILY_AUTOMATION_ENABLED ?? ""),
+      projects: parseBranchList(env.HUB_DAILY_AUTOMATION_PROJECTS),
     },
     discord: { token: env.DISCORD_BOT_TOKEN, channelId: env.DISCORD_CHANNEL_ID },
     notion: { token: env.NOTION_TOKEN, databaseId: env.NOTION_DATABASE_ID },

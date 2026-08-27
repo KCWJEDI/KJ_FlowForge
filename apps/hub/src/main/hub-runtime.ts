@@ -197,7 +197,10 @@ export class HubRuntime extends EventEmitter {
     this.lastRepositoriesWarning = null;
     const entries: Record<string, string> = { ...input };
     // 일반 사용자는 08:00 자동화 설정을 변경할 수 없습니다.
-    if (this.role !== "admin") delete entries.HUB_DAILY_AUTOMATION_ENABLED;
+    if (this.role !== "admin") {
+      delete entries.HUB_DAILY_AUTOMATION_ENABLED;
+      delete entries.HUB_DAILY_AUTOMATION_PROJECTS;
+    }
     const current = await readEnvFile(this.config.envFile);
     const updates: Record<string, string> = {};
     for (const definition of ENV_DEFINITIONS) {
@@ -277,6 +280,9 @@ export class HubRuntime extends EventEmitter {
     this.config.repositories = parseRepositoriesForConfig(next.get("HUB_GIT_REPOSITORIES"));
     this.config.dailyAutomation = {
       enabled: this.role === "admin" && parseBoolean(next.get("HUB_DAILY_AUTOMATION_ENABLED")),
+      projects: this.role === "admin"
+        ? [...new Set((next.get("HUB_DAILY_AUTOMATION_PROJECTS") ?? "").split(",").map((value) => value.trim()).filter(Boolean))]
+        : [],
     };
     this.config.discord = {
       token: next.get("DISCORD_BOT_TOKEN") || undefined,

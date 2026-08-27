@@ -1,4 +1,4 @@
-import { dialog, ipcMain, type BrowserWindow } from "electron";
+import { app, dialog, ipcMain, type BrowserWindow } from "electron";
 import { z } from "zod";
 import type { HubRuntime } from "./hub-runtime";
 import type { LicenseService } from "./license-service";
@@ -57,6 +57,19 @@ export function registerLicenseIpc(getLicenseService?: () => LicenseService | nu
     if (result.status === "offline") return { activated: false, reason: "grace-offline" };
     if (result.status === "blocked") return { activated: false, reason: "blocked" };
     return { activated: false, reason: "invalid" };
+  });
+  ipcMain.handle("hub:replace-license", async (_event, raw: unknown) => {
+    const input = licenseSchema.parse(raw);
+    const service = getLicenseService?.();
+    if (!service) throw new Error("라이선스 서비스를 사용할 수 없습니다.");
+    const result = await service.check(input.key);
+    if (result.status !== "ok") {
+      if (result.status === "offline") throw new Error("인터넷 연결을 확인해 주세요.");
+      if (result.status === "blocked") throw new Error("사용이 중지된 라이선스입니다.");
+      throw new Error("유효하지 않은 라이선스 키입니다.");
+    }
+    setImmediate(() => { app.relaunch(); app.exit(0); });
+    return { activated: true, keyId: result.keyId, owner: result.owner, role: result.role };
   });
 }
 

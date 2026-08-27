@@ -131,6 +131,7 @@ export class DailyAutomation {
   public getView(): DailyAutomationView {
     return {
       enabled: this.options.config.dailyAutomation.enabled,
+      selectedProjects: [...(this.options.config.dailyAutomation.projects ?? [])],
       repositories: this.repositoryViews,
       nextRunAt: this.options.config.dailyAutomation.enabled && !this.stopped
         ? nextLocalRunAt().toISOString()
@@ -172,7 +173,10 @@ export class DailyAutomation {
     this.options.onChanged();
 
     try {
-      const repositories = this.options.config.repositories;
+      const selectedProjects = this.options.config.dailyAutomation.projects;
+      const repositories = selectedProjects === undefined
+        ? this.options.config.repositories
+        : this.options.config.repositories.filter((repository) => selectedProjects.includes(projectName(repository.project)));
       if (repositories.length === 0) throw new Error("모니터링할 Git 저장소가 설정되지 않았습니다.");
       if (!this.options.notion.enabled) throw new Error("Notion integration is not configured");
 
@@ -394,7 +398,10 @@ export class DailyAutomation {
   }
 
   private async refreshBranches(): Promise<void> {
-    const repositories = this.options.config.repositories;
+    const selectedProjects = this.options.config.dailyAutomation.projects;
+    const repositories = selectedProjects === undefined
+      ? this.options.config.repositories
+      : this.options.config.repositories.filter((repository) => selectedProjects.includes(projectName(repository.project)));
     const views: DailyAutomationView["repositories"] = [];
     for (const repositorySetting of repositories) {
       let repoPath = repositorySetting.path ?? null;
@@ -425,6 +432,10 @@ export class DailyAutomation {
     this.repositoryViews = views;
     this.options.onChanged();
   }
+}
+
+function projectName(value?: string): string {
+  return value?.trim() || "미지정 프로젝트";
 }
 
 interface CapturedBranch {

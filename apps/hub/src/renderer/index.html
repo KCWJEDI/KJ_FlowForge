@@ -21,10 +21,14 @@
 
     <nav class="tab-bar" id="main-tabs" aria-label="Main tabs">
       <button id="tab-dashboard" class="tab active" type="button" data-panel="dashboard">대시보드</button>
+      <button id="tab-automation" class="tab" type="button" data-panel="automation">08시 일일 작업등록</button>
       <button id="tab-settings" class="tab" type="button" data-panel="settings">설정</button>
     </nav>
 
     <section id="panel-dashboard" class="layout">
+      <div class="project-filter">
+        <label>프로젝트 <select id="dashboard-project"></select></label>
+      </div>
       <section class="grid">
         <div class="card">
           <div class="card-head">
@@ -57,6 +61,9 @@
         </div>
       </section>
 
+    </section>
+
+    <section id="panel-automation" class="layout" hidden>
     <section id="automation-section" class="grid automation-grid">
         <div class="card automation-card">
           <div class="card-head">
@@ -68,7 +75,7 @@
               <input id="automation-enabled" type="checkbox" />
               매일 오전 08:00 새 커밋 분석 및 일일작업 등록
             </label>
-            <div id="automation-repositories" class="repository-list"></div>
+            <div id="automation-projects" class="repository-list"></div>
             <p class="muted">
               설정 탭에서 추가한 저장소의 선택한 브랜치를 분석합니다. 자동 커밋, Push, 파일 변경은 수행하지 않습니다.
             </p>
@@ -81,8 +88,7 @@
             </div>
           </div>
         </div>
-      </section>
-
+    </section>
     </section>
 
     <section id="panel-settings" class="layout" hidden>
@@ -96,6 +102,7 @@
           <button id="settings-tab-git" class="tab" type="button" data-settings-panel="git">Git 저장소</button>
           <button id="settings-tab-notion" class="tab" type="button" data-settings-panel="notion">Notion 저장소</button>
           <button id="settings-tab-status" class="tab" type="button" data-settings-panel="status">연결 상태</button>
+          <button id="settings-tab-license" class="tab" type="button" data-settings-panel="license">라이선스</button>
         </nav>
 
         <div id="settings-pane-env">
@@ -151,6 +158,15 @@
           <div id="integration-statuses" class="status-list"></div>
           <div class="row">
             <button id="settings-test-status" class="ghost" type="button">연결 상태 테스트</button>
+          </div>
+        </div>
+
+        <div id="settings-pane-license" hidden>
+          <div class="stack">
+            <p class="muted">새 라이선스 키가 확인되면 프로그램이 자동으로 재시작되고 역할에 맞는 화면이 적용됩니다.</p>
+            <label>새 라이선스 키 <input id="settings-license-key" type="password" autocomplete="off" /></label>
+            <div class="row"><button id="settings-license-change" class="primary" type="button">라이선스 변경</button></div>
+            <span id="settings-license-message" class="error-text" role="alert"></span>
           </div>
         </div>
       </div>
