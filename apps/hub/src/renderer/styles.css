@@ -477,6 +477,11 @@ details pre {
   box-sizing: border-box;
 }
 
+.input-required {
+  border-color: var(--err) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--err) 35%, transparent);
+}
+
 .repository-branch-row {
   display: flex;
   gap: 8px;

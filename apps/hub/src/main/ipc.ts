@@ -86,6 +86,11 @@ export function registerIpc(
 
   ipcMain.handle("hub:get-state", () => runtime.getState());
   ipcMain.handle("hub:inspect-git", (_event, repository?: unknown) => runtime.inspectGit(optionalRepository(repository)));
+  ipcMain.handle("hub:list-git-branches", (_event, repository?: unknown) => runtime.listGitBranches(optionalRepository(repository)));
+  ipcMain.handle("hub:switch-git-branch", (_event, raw: unknown) => {
+    const input = z.object({ repository: z.string().min(1).optional(), branch: z.string().min(1) }).parse(raw);
+    return runtime.switchGitBranch(optionalRepository(input.repository), input.branch);
+  });
   ipcMain.handle("hub:git-create-branch", (_event, raw: unknown) => {
     const input = branchSchema.parse(raw);
     return runtime.gitCreateBranch(optionalRepository(input.repository), input.branch, input.startPoint);

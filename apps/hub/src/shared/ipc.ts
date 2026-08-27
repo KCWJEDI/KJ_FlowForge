@@ -151,6 +151,8 @@ export interface DashboardState {
 export interface HubApi {
   getState(): Promise<DashboardState>;
   inspectGit(repository?: string): Promise<GitStatusView>;
+  listGitBranches(repository?: string): Promise<string[]>;
+  switchGitBranch(args: { repository?: string; branch: string }): Promise<GitStatusView>;
   gitCreateBranch(args: { repository?: string; branch: string; startPoint?: string }): Promise<GitStatusView>;
   gitStage(args: { repository?: string; paths: string[] }): Promise<GitStatusView>;
   gitCommit(args: { repository?: string }): Promise<GitChangeSummary>;

@@ -4,6 +4,8 @@ import type { DashboardState, HubApi } from "../shared/ipc";
 const api: HubApi = {
   getState: () => ipcRenderer.invoke("hub:get-state"),
   inspectGit: (repository) => ipcRenderer.invoke("hub:inspect-git", repository),
+  listGitBranches: (repository) => ipcRenderer.invoke("hub:list-git-branches", repository),
+  switchGitBranch: (args) => ipcRenderer.invoke("hub:switch-git-branch", args),
   gitCreateBranch: (args) => ipcRenderer.invoke("hub:git-create-branch", args),
   gitStage: (args) => ipcRenderer.invoke("hub:git-stage", args),
   gitCommit: (args) => ipcRenderer.invoke("hub:git-commit", args),

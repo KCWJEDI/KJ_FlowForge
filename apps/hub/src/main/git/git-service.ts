@@ -102,6 +102,12 @@ export class GitService {
     await this.withRepositoryLock(root, () => this.git(root, ["switch", "-c", branch, startPoint]).then(() => undefined));
   }
 
+  public async switchBranch(repository: string, branch: string): Promise<void> {
+    validateRef(branch);
+    const root = await this.root(repository);
+    await this.withRepositoryLock(root, () => this.git(root, ["switch", branch]).then(() => undefined));
+  }
+
   public async stage(repository: string, paths: string[]): Promise<void> {
     if (paths.length === 0) throw new Error("At least one path is required to stage files");
     const root = await this.root(repository);

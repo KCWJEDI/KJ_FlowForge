@@ -26,6 +26,7 @@ const $ = {
   refreshState: required<HTMLButtonElement>(document.getElementById("refresh-state"), "refresh-state"),
   gitRefresh: required<HTMLButtonElement>(document.getElementById("git-refresh"), "git-refresh"),
   gitRepository: required<HTMLSelectElement>(document.getElementById("git-repository"), "git-repository"),
+  gitBranches: required<HTMLElement>(document.getElementById("git-branches"), "git-branches"),
   gitSummary: required<HTMLElement>(document.getElementById("git-summary"), "git-summary"),
   gitConflicts: required<HTMLElement>(document.getElementById("git-conflicts"), "git-conflicts"),
   gitFiles: required<HTMLTableElement>(document.getElementById("git-files"), "git-files"),
@@ -86,6 +87,7 @@ const state: {
   dashboard: DashboardState | null;
   git: GitStatusView | null;
   gitBusy: boolean;
+  gitBranches: string[];
   settings: SettingsView | null;
   settingsStatuses: IntegrationConnectionStatus[];
   settingsBusy: boolean;
@@ -101,6 +103,7 @@ const state: {
   dashboard: null,
   git: null,
   gitBusy: false,
+  gitBranches: [],
   settings: null,
   settingsStatuses: [],
   settingsBusy: false,
@@ -175,11 +178,12 @@ function renderGitRepositoryOptions(): void {
     option.textContent = "설정된 저장소 없음";
     $.gitRepository.appendChild(option);
   } else {
-    for (const repo of repos) {
+    for (const [index, repo] of repos.entries()) {
       const repoPath = repo.path ?? "";
       const option = document.createElement("option");
-      option.value = repoPath;
-      option.textContent = repoPath;
+      option.value = String(index);
+      option.dataset.path = repoPath;
+      option.textContent = `${projectName(repo.project)} · ${repo.label || "저장소"} · ${repo.username || "KCWJEDI"} · ${repoPath}`;
       $.gitRepository.appendChild(option);
     }
   }
@@ -187,7 +191,7 @@ function renderGitRepositoryOptions(): void {
   if (previous && Array.from($.gitRepository.options).some((o) => o.value === previous)) {
     selected = previous;
   } else if (repos.length > 0) {
-    selected = repos[0]?.path ?? "";
+    selected = "0";
   }
   $.gitRepository.value = selected;
   if (selected && selected !== previous && !state.gitBusy) {
@@ -195,7 +199,7 @@ function renderGitRepositoryOptions(): void {
   }
 }
 function selectedRepository(): string | undefined {
-  const value = $.gitRepository.value.trim();
+  const value = $.gitRepository.selectedOptions[0]?.dataset.path?.trim() ?? "";
   return value || undefined;
 }
 
@@ -207,11 +211,16 @@ async function refreshGit(): Promise<void> {
   $.gitPush.disabled = true;
   setStatus("Git 상태 읽는 중…");
   try {
-    state.git = await window.hub.inspectGit(selectedRepository());
+    const repository = selectedRepository();
+    [state.git, state.gitBranches] = await Promise.all([
+      window.hub.inspectGit(repository),
+      window.hub.listGitBranches(repository),
+    ]);
     renderGit();
   } catch (error) {
     $.gitSummary.textContent = "Git 사용 불가";
     state.git = null;
+    state.gitBranches = [];
     renderGit();
     setGitError(error instanceof Error ? error.message : String(error));
   } finally {
@@ -223,6 +232,7 @@ async function refreshGit(): Promise<void> {
 
 function renderGit(): void {
   const git = state.git;
+  renderGitBranches();
   const empty: GitStatusView = {
     repository: "",
     branch: "",
@@ -442,6 +452,40 @@ function renderDashboard(dashboard: DashboardState): void {
   renderGitRepositoryOptions();
   renderDailyAutomation(dashboard.dailyAutomation);
   renderSettingsNotion();
+}
+
+function renderGitBranches(): void {
+  $.gitBranches.innerHTML = "";
+  if (state.gitBranches.length === 0) {
+    $.gitBranches.textContent = "선택 가능한 로컬 브랜치가 없습니다.";
+    return;
+  }
+  for (const branch of state.gitBranches) {
+    const label = document.createElement("label");
+    label.className = "branch-option";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = state.git?.branch === branch;
+    input.disabled = state.gitBusy;
+    input.addEventListener("change", async () => {
+      if (!input.checked || state.git?.branch === branch) {
+        input.checked = state.git?.branch === branch;
+        return;
+      }
+      state.gitBusy = true;
+      try {
+        state.git = await window.hub.switchGitBranch({ repository: selectedRepository(), branch });
+        await refreshGit();
+      } catch (error) {
+        setGitError(error instanceof Error ? error.message : String(error));
+        renderGitBranches();
+      } finally {
+        state.gitBusy = false;
+      }
+    });
+    label.append(input, document.createTextNode(branch));
+    $.gitBranches.appendChild(label);
+  }
 }
 
 function projectName(value?: string): string {
@@ -802,6 +846,7 @@ function buildSettingsRepositoryCard(index: number): HTMLElement {
   projectLabel.textContent = "프로젝트 이름";
   const projectInput = document.createElement("input");
   projectInput.type = "text";
+  projectInput.className = "repository-project-input";
   projectInput.placeholder = "예: DiceGambit";
   projectInput.value = draft.project ?? "";
   projectInput.addEventListener("input", () => {
@@ -862,73 +907,13 @@ function buildSettingsRepositoryCard(index: number): HTMLElement {
   urlInput.className = "repository-url-input";
   urlInput.placeholder = "예: https://github.com/사용자명/저장소명";
   urlInput.value = draft.url ?? "";
-  let urlLoadTimer: ReturnType<typeof setTimeout> | undefined;
   urlInput.addEventListener("input", () => {
     const item = state.repositoryDrafts[index];
-   if (!item) return;
-   item.url = urlInput.value.trim();
-    if (urlLoadTimer) clearTimeout(urlLoadTimer);
-    if (item.url) urlLoadTimer = setTimeout(() => void loadRemoteBranches(), 700);
- });
- urlLabel.appendChild(urlInput);
- card.appendChild(urlLabel);
-
- const remoteBranchRow = document.createElement("div");
-  remoteBranchRow.className = "repository-branch-row";
-  const remoteBranchSelect = document.createElement("select");
-  remoteBranchSelect.className = "repository-branch-select";
-  const emptyBranch = document.createElement("option");
-  emptyBranch.value = "";
-  emptyBranch.textContent = "GitHub URL을 확인해 브랜치를 불러오세요";
-  remoteBranchSelect.appendChild(emptyBranch);
-  const loadBranchesButton = document.createElement("button");
-  loadBranchesButton.type = "button";
-  loadBranchesButton.className = "ghost";
-  loadBranchesButton.textContent = "브랜치 불러오기";
-  const branchMessage = document.createElement("span");
-  branchMessage.className = "muted";
-  const loadRemoteBranches = async (): Promise<void> => {
-    const item = state.repositoryDrafts[index];
-    if (!item || !item.url.trim()) {
-      branchMessage.textContent = "먼저 GitHub URL을 입력하세요.";
-      return;
-    }
-    loadBranchesButton.disabled = true;
-    branchMessage.textContent = "브랜치 확인 중…";
-    try {
-      const branches = await window.hub.listGitRemoteBranches(item.url);
-      remoteBranchSelect.innerHTML = "";
-      const placeholder = document.createElement("option");
-      placeholder.value = "";
-      placeholder.textContent = "적용할 브랜치를 선택하세요";
-      remoteBranchSelect.appendChild(placeholder);
-      for (const branch of branches) {
-        const option = document.createElement("option");
-        option.value = branch;
-        option.textContent = branch;
-        remoteBranchSelect.appendChild(option);
-      }
-      remoteBranchSelect.value = item.defaultBranch ?? "";
-      branchMessage.textContent = branches.length > 0 ? `${branches.length}개 브랜치를 불러왔습니다.` : "원격 브랜치가 없습니다.";
-    } catch (error) {
-      branchMessage.textContent = `브랜치 확인 실패: ${error instanceof Error ? error.message : String(error)}`;
-    } finally {
-      loadBranchesButton.disabled = false;
-    }
-  };
-  remoteBranchSelect.addEventListener("change", () => {
-    const item = state.repositoryDrafts[index];
     if (!item) return;
-    item.defaultBranch = remoteBranchSelect.value;
-    item.branches = remoteBranchSelect.value ? [remoteBranchSelect.value] : [];
-    renderSettingsRepositories();
+    item.url = urlInput.value.trim();
   });
-  loadBranchesButton.addEventListener("click", () => void loadRemoteBranches());
-  remoteBranchRow.append(remoteBranchSelect, loadBranchesButton);
-  card.appendChild(remoteBranchRow);
-  card.appendChild(branchMessage);
-  if (draft.url.trim()) void loadRemoteBranches();
-
+  urlLabel.appendChild(urlInput);
+  card.appendChild(urlLabel);
 
   if (viewItem?.repositoryError) {
     const error = document.createElement("p");
@@ -936,44 +921,6 @@ function buildSettingsRepositoryCard(index: number): HTMLElement {
     error.textContent = viewItem.repositoryError;
     card.appendChild(error);
   }
-
-  const branchBlock = document.createElement("div");
-  const branchTitle = document.createElement("div");
-  branchTitle.className = "setting-label";
-  branchTitle.textContent = "자동화 대상 브랜치";
-  branchBlock.appendChild(branchTitle);
-  const branchOptions = document.createElement("div");
-  branchOptions.className = "branch-options";
-  const branches = [...new Set([...(viewItem?.availableBranches ?? []), ...draft.branches])];
-  if (branches.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "empty";
-    empty.textContent = "먼저 정상적인 로컬 Git 저장소 폴터를 선택하세요.";
-    branchOptions.appendChild(empty);
-  }
-  for (const branch of branches) {
-    const label = document.createElement("label");
-    label.className = "branch-option";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.value = branch;
-    input.checked = draft.branches.includes(branch);
-    input.addEventListener("change", () => {
-      const item = state.repositoryDrafts[index];
-      if (!item) return;
-      const list = item.branches;
-      if (input.checked) {
-        if (!list.includes(branch)) list.push(branch);
-      } else {
-        const position = list.indexOf(branch);
-        if (position >= 0) list.splice(position, 1);
-      }
-    });
-    label.append(input, document.createTextNode(branch));
-    branchOptions.appendChild(label);
-  }
-  branchBlock.appendChild(branchOptions);
-  card.appendChild(branchBlock);
 
   const discordBlock = document.createElement("div");
   discordBlock.className = "discord-condition-block";
@@ -1027,6 +974,19 @@ function buildSettingsRepositoryCard(index: number): HTMLElement {
 async function saveRepositories(): Promise<void> {
   const api = settingsHub();
   if (!api) return;
+  const missingProjectIndex = state.repositoryDrafts.findIndex(
+    (draft) => draft.path.trim().length > 0 && !draft.project?.trim(),
+  );
+  if (missingProjectIndex >= 0) {
+    state.repositoryCollapsed[missingProjectIndex] = false;
+    renderSettingsRepositories();
+    const input = $.settingsRepositories.querySelectorAll<HTMLInputElement>(".repository-project-input")[missingProjectIndex];
+    input?.classList.add("input-required");
+    input?.scrollIntoView({ behavior: "smooth", block: "center" });
+    input?.focus();
+    $.settingsRepositoriesMessage.textContent = "프로젝트 이름을 입력해야 저장할 수 있습니다.";
+    return;
+  }
   $.settingsRepositoriesMessage.textContent = "저장 중…";
   const payload = state.repositoryDrafts
     .filter((draft) => draft.path.trim().length > 0)
@@ -1039,7 +999,7 @@ async function saveRepositories(): Promise<void> {
       branches: draft.branches,
       discordMinCommits: draft.discordMinCommits ?? 0,
       discordBranches: draft.discordBranches ?? [],
-      project: draft.project?.trim() || undefined,
+      project: draft.project!.trim(),
       notionDatabaseId: draft.notionDatabaseId?.trim() || undefined,
     }));
   try {
@@ -1047,7 +1007,9 @@ async function saveRepositories(): Promise<void> {
     state.settings = result.settings;
     state.settingsStatuses = result.statuses;
     $.settingsRepositoriesMessage.textContent = "저장소 설정이 저장되었습니다.";
-    void refreshState();
+    state.repositoryDrafts = [];
+    await refreshState();
+    renderSettingsRepositories();
   } catch (error) {
     $.settingsRepositoriesMessage.textContent = `저장 실패: ${error instanceof Error ? error.message : String(error)}`;
   }

@@ -86,6 +86,17 @@ export class HubRuntime extends EventEmitter {
     return this.git.inspect(this.resolveRepository(repository));
   }
 
+  public async listGitBranches(repository?: string): Promise<string[]> {
+    return this.git.listBranches(this.resolveRepository(repository));
+  }
+
+  public async switchGitBranch(repository: string | undefined, branch: string): Promise<GitStatusView> {
+    const target = this.resolveRepository(repository);
+    await this.git.switchBranch(target, branch);
+    this.emitState();
+    return this.git.inspect(target);
+  }
+
   public async gitCreateBranch(repository: string | undefined, branch: string, startPoint?: string): Promise<GitStatusView> {
     const target = this.resolveRepository(repository);
     await this.git.createBranch(target, branch, startPoint);
