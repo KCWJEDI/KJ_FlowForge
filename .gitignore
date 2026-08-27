@@ -22,3 +22,4 @@ UserSettings/
 apps/hub/release/win-unpacked/
 apps/hub/release/builder-debug.yml
 apps/hub/release/*.exe
+apps/hub/release/*.nsis.7z

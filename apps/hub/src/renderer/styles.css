@@ -233,6 +233,23 @@ button.ghost {
   color: var(--text);
 }
 
+.push-button {
+  background: #ffc966;
+  border: 1px solid #ffb84d;
+  color: #4d3600;
+  font-weight: 600;
+}
+
+.push-button:hover {
+  filter: brightness(1.05);
+}
+
+.push-button:disabled {
+  background: #ffc966;
+  color: #4d3600;
+  opacity: 0.45;
+}
+
 button.primary {
   background: var(--accent-2);
 }
@@ -549,14 +566,12 @@ details pre {
 }
 
 .dashboard-git-grid .card {
-  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent),
-    0 0 14px color-mix(in srgb, var(--accent) 35%, transparent),
-    0 0 30px color-mix(in srgb, var(--accent) 18%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.dashboard-git-grid .card:focus-within,
-.dashboard-git-grid .card:has(.branch-option.active) {
+.dashboard-git-grid .card.neon {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent),
     0 0 16px color-mix(in srgb, var(--accent) 60%, transparent),

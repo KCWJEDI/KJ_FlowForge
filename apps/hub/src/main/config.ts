@@ -92,7 +92,7 @@ function parseRepositories(
       const parsed = JSON.parse(repositoriesRaw) as unknown;
       if (Array.isArray(parsed)) {
         return parsed
-          .filter((item): item is { project?: unknown; label?: unknown; username?: unknown; defaultBranch?: unknown; path?: unknown; url?: unknown; branches?: unknown; discordMinCommits?: unknown; discordBranches?: unknown; notionDatabaseId?: unknown } =>
+          .filter((item): item is { project?: unknown; label?: unknown; username?: unknown; defaultBranch?: unknown; path?: unknown; url?: unknown; branches?: unknown; discordMinCommits?: unknown; discordBranches?: unknown; notionDatabaseId?: unknown; discordChannelId?: unknown } =>
            Boolean(item) && typeof item === "object")
          .map((item) => ({
            project: typeof item.project === "string" && item.project.trim() ? item.project.trim() : "",
@@ -105,6 +105,7 @@ function parseRepositories(
            discordMinCommits: parseMinCommits(item.discordMinCommits),
            discordBranches: parseBranchArray(item.discordBranches),
            notionDatabaseId: typeof item.notionDatabaseId === "string" ? item.notionDatabaseId.trim() : "",
+           discordChannelId: typeof item.discordChannelId === "string" ? item.discordChannelId.trim() : "",
          }))
          .filter((item) => item.path.length > 0);
       }

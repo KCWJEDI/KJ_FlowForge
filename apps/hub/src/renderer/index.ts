@@ -92,6 +92,17 @@ const $ = {
   automationMessageText: required<HTMLElement>(document.getElementById("automation-message-text"), "automation-message-text"),
 }; 
 
+/** 현재 네온이 켜져 있는 Git 커밋/푸시 카드 (포커스가 어디에도 없으면 마지막 포커싱된 카드 유지). */
+let neonFocusedCard: HTMLElement | null = null;
+
+function trackCardFocus(card: HTMLElement): void {
+  card.addEventListener("focusin", () => {
+    if (neonFocusedCard && neonFocusedCard !== card) neonFocusedCard.classList.remove("neon");
+    neonFocusedCard = card;
+    card.classList.add("neon");
+  });
+}
+
 const state: {
   dashboard: DashboardState | null;
   git: GitStatusView | null;
@@ -402,7 +413,7 @@ function updateGitButtons(): void {
   const activeBranches = state.gitActiveBranches.filter((branch) => branch.trim().length > 0);
   const hasActiveBranches = activeBranches.length > 0;
   $.gitCommit.disabled = !hasRepo || !hasChanges || activeBranches.length !== 1;
-  $.gitPush.disabled = !hasRepo || !hasActiveBranches;
+  $.gitPush.disabled = !hasRepo || activeBranches.length !== 1;
   $.gitDailyReport.disabled = !hasRepo || !hasActiveBranches;
 }
 
@@ -874,6 +885,7 @@ function addDashboardGitCard(initialPath?: string): void {
   const card = primary.cloneNode(true) as HTMLElement;
   card.classList.add("dashboard-extra-card");
   card.querySelectorAll<HTMLElement>("[id]").forEach((element) => element.removeAttribute("id"));
+  trackCardFocus(card);
   const select = card.querySelector<HTMLSelectElement>("select")!;
   const refresh = card.querySelector<HTMLButtonElement>(".card-head button")!;
   const branches = card.querySelector<HTMLElement>(".git-branch-picker")!;
@@ -885,6 +897,7 @@ function addDashboardGitCard(initialPath?: string): void {
   const commit = buttons[0]!;
   const push = buttons[1]!;
   const report = buttons[2] as HTMLButtonElement | undefined;
+  push.classList.add("push-button");
   const error = card.querySelector<HTMLElement>(".error-text")!;
   select.innerHTML = "";
   let preselected = "";
@@ -907,6 +920,7 @@ function addDashboardGitCard(initialPath?: string): void {
         container: branches,
         names,
         current: git.branch,
+        empty: currentCardBranches(select.value).length === 0,
         selected: currentCardBranches(select.value),
         active: currentCardActiveBranches(select.value),
         onSwitch: async (branch) => {
@@ -929,7 +943,7 @@ function addDashboardGitCard(initialPath?: string): void {
       }
       const active = currentCardActiveBranches(select.value).filter((branch) => branch.trim().length > 0);
       commit.disabled = git.clean || active.length !== 1;
-      push.disabled = active.length === 0;
+      push.disabled = active.length !== 1;
       if (report) report.disabled = active.length === 0;
     } catch (cause) {
       error.textContent = cause instanceof Error ? cause.message : String(cause);
@@ -1014,19 +1028,20 @@ function buildWorkBranchPicker(options: {
   current: string;
   selected?: string[];
   active?: string[];
+  empty?: boolean;
   onActiveChange?: (active: string[]) => void;
   onSwitch: (branch: string) => Promise<void>;
   onChange?: (branches: string[]) => void;
 }): void {
   const { container, names, current, onSwitch, onChange, onActiveChange } = options;
   container.innerHTML = "";
-  const seed = (options.selected && options.selected.length > 0 ? options.selected : [current]);
+  const seed = options.empty ? [] : (options.selected && options.selected.length > 0 ? options.selected : [current]);
   const workBranches: string[] = [];
   for (const branch of seed) {
     if (!workBranches.includes(branch)) workBranches.push(branch);
   }
   const activeBranches: string[] = [];
-  const seedActive = (options.active && options.active.length > 0 ? options.active : seed);
+  const seedActive = options.empty ? [] : (options.active && options.active.length > 0 ? options.active : seed);
   for (const branch of seedActive) {
     if (workBranches.includes(branch) && !activeBranches.includes(branch)) activeBranches.push(branch);
   }
@@ -2067,6 +2082,8 @@ function scheduleAutoSave(): void {
 }
 
 function bindEvents(): void {
+  const primaryCard = $.gitRepository.closest<HTMLElement>(".card");
+  if (primaryCard) trackCardFocus(primaryCard);
   $.refreshState.addEventListener("click", () => void refreshState());
   $.gitRefresh.addEventListener("click", () => void refreshGit());
   $.gitRepository.addEventListener("change", () => void refreshGit());
