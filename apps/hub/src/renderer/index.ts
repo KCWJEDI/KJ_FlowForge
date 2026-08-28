@@ -419,7 +419,7 @@ function updateGitButtons(): void {
   const activeBranches = state.gitActiveBranches.filter((branch) => branch.trim().length > 0);
   const hasActiveBranches = activeBranches.length > 0;
   $.gitCommit.disabled = !hasRepo || !hasChanges || activeBranches.length !== 1;
-  $.gitPush.disabled = !hasRepo || activeBranches.length !== 1;
+  $.gitPush.disabled = !hasRepo || !hasChanges || activeBranches.length !== 1;
   $.gitDailyReport.disabled = !hasRepo || !hasActiveBranches;
 }
 
@@ -915,11 +915,11 @@ function addDashboardGitCard(initialPath?: string): void {
   let busy = false;
   let clean = true;
   const currentActive = (): string[] => currentCardActiveBranches(select.value).filter((branch) => branch.trim().length > 0);
-  const applyCardButtonState = (): void => {
-    if (busy) return;
+ const applyCardButtonState = (): void => {
+   if (busy) return;
     const active = currentActive();
     commit.disabled = active.length !== 1 || clean;
-    push.disabled = active.length !== 1;
+    push.disabled = active.length !== 1 || clean;
     if (report) report.disabled = active.length === 0;
   };
   const setBusy = (value: boolean): void => {
@@ -927,8 +927,9 @@ function addDashboardGitCard(initialPath?: string): void {
     commit.disabled = value;
     push.disabled = value;
     if (report) report.disabled = value;
+    if (!value) applyCardButtonState();
   };
-  const render = async (): Promise<void> => {
+ const render = async (): Promise<void> => {
     error.textContent = "";
     try {
       const [git, names] = await Promise.all([window.hub.inspectGit(select.value), window.hub.listGitBranches(select.value)]);
