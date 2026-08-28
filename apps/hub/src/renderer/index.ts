@@ -912,6 +912,22 @@ function addDashboardGitCard(initialPath?: string): void {
     if (initialPath && repository.path === initialPath) preselected = repository.path;
   }
   if (preselected) select.value = preselected;
+  let busy = false;
+  let clean = true;
+  const currentActive = (): string[] => currentCardActiveBranches(select.value).filter((branch) => branch.trim().length > 0);
+  const applyCardButtonState = (): void => {
+    if (busy) return;
+    const active = currentActive();
+    commit.disabled = active.length !== 1 || clean;
+    push.disabled = active.length !== 1;
+    if (report) report.disabled = active.length === 0;
+  };
+  const setBusy = (value: boolean): void => {
+    busy = value;
+    commit.disabled = value;
+    push.disabled = value;
+    if (report) report.disabled = value;
+  };
   const render = async (): Promise<void> => {
     error.textContent = "";
     try {
@@ -919,6 +935,7 @@ function addDashboardGitCard(initialPath?: string): void {
       summary.textContent = `브랜치 ${git.branch} · ${git.clean ? "변경 없음" : `${git.files.length}개 파일 변경`}`;
       conflicts.hidden = git.conflicts.length === 0;
       conflicts.textContent = git.conflicts.length ? `병합 충돌: ${git.conflicts.join(", ")}` : "";
+      clean = git.clean;
       buildWorkBranchPicker({
         container: branches,
         names,
@@ -926,13 +943,16 @@ function addDashboardGitCard(initialPath?: string): void {
         selected: currentCardBranches(select.value),
         active: currentCardActiveBranches(select.value),
         onSwitch: async (branch) => {
+          setBusy(true);
           try { await window.hub.switchGitBranch({ repository: select.value, branch }); await render(); }
           catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
+          finally { setBusy(false); }
         },
         onChange: (list) => saveCardBranches(select.value, list),
         onActiveChange: (active) => {
           saveCardActiveBranches(select.value, active);
           void render();
+          applyCardButtonState();
         },
       });
       const body = table.tBodies[0]!;
@@ -943,10 +963,7 @@ function addDashboardGitCard(initialPath?: string): void {
         row.insertCell().textContent = file.indexStatus;
         row.insertCell().textContent = file.workTreeStatus;
       }
-      const active = currentCardActiveBranches(select.value).filter((branch) => branch.trim().length > 0);
-      commit.disabled = git.clean || active.length !== 1;
-      push.disabled = active.length !== 1;
-      if (report) report.disabled = active.length === 0;
+      applyCardButtonState();
     } catch (cause) {
       error.textContent = cause instanceof Error ? cause.message : String(cause);
     }
@@ -954,31 +971,46 @@ function addDashboardGitCard(initialPath?: string): void {
   select.addEventListener("change", () => void render());
   refresh.addEventListener("click", () => void render());
   commit.addEventListener("click", async () => {
+    if (busy) return;
     try {
-      const active = currentCardActiveBranches(select.value).filter((branch) => branch.trim().length > 0);
+      const active = currentActive();
       if (active.length !== 1) {
         error.textContent = active.length === 0 ? "활성 브랜치를 1개 선택하세요." : "커밋은 활성 브랜치가 정확히 1개일 때만 가능합니다.";
         return;
       }
+      setBusy(true);
       const git = await window.hub.inspectGit(select.value);
       if (git.branch !== active[0]) await window.hub.switchGitBranch({ repository: select.value, branch: active[0]! });
       await window.hub.gitCommit({ repository: select.value });
+      setStatus("커밋 완료(푸시 대기): " + active[0] + " — 푸시 버튼을 눌러야 원격에 반영됩니다");
       await render();
+      setBusy(false);
     }
-    catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
+    catch (cause) { setBusy(false); error.textContent = cause instanceof Error ? cause.message : String(cause); }
   });
   push.addEventListener("click", async () => {
-    try { await gitPushActiveBranches({ repository: select.value }); await render(); }
-    catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
+    if (busy) return;
+    try {
+      const active = currentActive();
+      if (active.length === 0) { error.textContent = "활성 브랜치를 하나 이상 선택하세요."; return; }
+      setBusy(true);
+      await gitPushActiveBranches({ repository: select.value });
+      setStatus("푸시 완료 (" + active.join(", ") + ")");
+      await render();
+      setBusy(false);
+    }
+    catch (cause) { setBusy(false); error.textContent = cause instanceof Error ? cause.message : String(cause); }
   });
   if (report) {
     report.addEventListener("click", async () => {
+      if (busy) return;
       try {
-        const branches = currentCardBranches(select.value);
+        const branches = currentActive();
         if (branches.length === 0) {
-          error.textContent = "작업 브랜치를 하나 이상 선택하세요.";
+          error.textContent = "활성 브랜치를 하나 이상 선택하세요.";
           return;
         }
+        setBusy(true);
         const range = previousEightIso();
         const result = await window.hub.reportManualDailyReport({
           date: range.date,
@@ -990,8 +1022,9 @@ function addDashboardGitCard(initialPath?: string): void {
         const failed = result.branches.filter((item) => item.status === "failed");
         error.textContent = failed.map((item) => item.repositoryLabel + "/" + item.branch + ": " + item.message).join("\n");
         if (failed.length === 0) setStatus(range.date + " 일일 요약 등록 완료 (브랜치 " + branches.length + "개)");
+        setBusy(false);
       } catch (cause) {
-        error.textContent = cause instanceof Error ? cause.message : String(cause);
+        setBusy(false); error.textContent = cause instanceof Error ? cause.message : String(cause);
       }
     });
   }
