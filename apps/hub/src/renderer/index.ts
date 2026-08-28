@@ -359,6 +359,17 @@ interface GitCardController {
 let mainGitController: GitCardController | null = null;
 let mainGitPendingPush = false;
 
+function gitErrorSummary(cause: unknown): string {
+  const message = cause instanceof Error ? cause.message : String(cause);
+  if (/overwritten by checkout|would be overwritten/i.test(message)) {
+    return '작업 브랜치를 바꾸기 전에 현재 브랜치의 변경사항을 커밋하거나 스태시해야 합니다. 미저장 변경사항이 새 브랜치에 덮어쓰여질 수 있습니다.';
+  }
+  if (/cannot switch branch/i.test(message)) {
+    return '아직 병합(merge)이 진행 중이라 브랜치를 바꿀 수 없습니다. 병합을 완료하거나 중단한 뒤 다시 시도하세요.';
+  }
+  return message;
+}
+
 async function pushActiveBranches(repository: string, active: string[]): Promise<void> {
   if (active.length === 0) throw new Error('활성 브랜치를 하나 이상 선택하세요.');
   const errors: string[] = [];
@@ -468,7 +479,7 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
       access.writeGit(await window.hub.switchGitBranch({ repository: access.repoPath(), branch: target }));
       await refresh();
     } catch (cause) {
-      errorEl.textContent = cause instanceof Error ? cause.message : String(cause);
+      errorEl.textContent = gitErrorSummary(cause);
     } finally {
       setBusy(false);
     }
@@ -547,7 +558,7 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
       setStatus('커밋 완료(푸시 대기): ' + summaryResult.newHead.slice(0, 8) + ' — 푸시 버튼을 눌러야 원격에 반영됩니다');
       await refresh();
     } catch (cause) {
-      errorEl.textContent = cause instanceof Error ? cause.message : String(cause);
+      errorEl.textContent = gitErrorSummary(cause);
       setStatus('커밋 실패');
     } finally {
       setBusy(false);
@@ -573,7 +584,7 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
       setStatus('푸시 완료 (' + active.join(', ') + ')');
       await refresh();
     } catch (cause) {
-      errorEl.textContent = cause instanceof Error ? cause.message : String(cause);
+      errorEl.textContent = gitErrorSummary(cause);
       setStatus('푸시 실패');
     } finally {
       setBusy(false);
@@ -610,7 +621,7 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
         setStatus(range.date + ' 일일 요약 등록 완료 (브랜치 ' + result.branches.length + '개)');
       }
     } catch (cause) {
-      errorEl.textContent = cause instanceof Error ? cause.message : String(cause);
+      errorEl.textContent = gitErrorSummary(cause);
       setStatus('일일 요약 등록 실패');
     } finally {
       setBusy(false);
