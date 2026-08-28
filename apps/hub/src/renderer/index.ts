@@ -1679,21 +1679,18 @@ async function saveNotionSettings(): Promise<void> {
   const api = settingsHub();
   if (!api) return;
   $.settingsNotionMessage.textContent = "저장 중...";
-  const payload = notionDatabaseDrafts()
+  // 저장소 목록은 config(저장된 원본)를 기준으로 유지하고, Notion DB ID만 덮어쓴다.
+  const payload = (state.dashboard?.config.repositories ?? [])
     .filter((draft) => draft.path.trim().length > 0)
-    .map((draft, index) => ({
-      label: draft.label || "저장소",
-      username: draft.username?.trim() ?? "",
-      defaultBranch: draft.defaultBranch?.trim() ?? "",
-      path: draft.path.trim(),
-      url: draft.url?.trim() ?? "",
-      branches: draft.branches,
-      discordMinCommits: draft.discordMinCommits ?? 0,
-      discordBranches: draft.discordBranches ?? [],
-      project: draft.project?.trim() || undefined,
-      notionDatabaseId: (state.notionRepositories[index]?.notionDatabaseId ?? draft.notionDatabaseId)?.trim() || undefined,
-      discordChannelId: (state.notionRepositories[index]?.discordChannelId ?? draft.discordChannelId)?.trim() || undefined,
-    }));
+    .map((draft) => {
+      const override = state.notionRepositories.find((item) => item.path === draft.path);
+      return {
+        ...draft,
+        project: draft.project?.trim() || undefined,
+        notionDatabaseId: (override?.notionDatabaseId ?? draft.notionDatabaseId)?.trim() || undefined,
+        discordChannelId: draft.discordChannelId?.trim() || undefined,
+      };
+    });
   try {
     const result = await api.saveSettings({ HUB_GIT_REPOSITORIES: JSON.stringify(payload) });
     state.settings = result.settings;
@@ -1996,21 +1993,18 @@ async function saveDiscordSettings(): Promise<void> {
   const api = settingsHub();
   if (!api) return;
   $.settingsDiscordMessage.textContent = "저장 중...";
-  const payload = discordDatabaseDrafts()
+  // 저장소 목록은 config(저장된 원본)를 기준으로 유지하고, Discord 채널 ID만 덮어쓴다.
+  const payload = (state.dashboard?.config.repositories ?? [])
     .filter((draft) => draft.path.trim().length > 0)
-    .map((draft, index) => ({
-      label: draft.label || "저장소",
-      username: draft.username?.trim() ?? "",
-      defaultBranch: draft.defaultBranch?.trim() ?? "",
-      path: draft.path.trim(),
-      url: draft.url?.trim() ?? "",
-      branches: draft.branches,
-      discordMinCommits: draft.discordMinCommits ?? 0,
-      discordBranches: draft.discordBranches ?? [],
-      project: draft.project?.trim() || undefined,
-      notionDatabaseId: draft.notionDatabaseId?.trim() || undefined,
-      discordChannelId: (state.discordRepositories[index]?.discordChannelId ?? draft.discordChannelId)?.trim() || undefined,
-    }));
+    .map((draft) => {
+      const override = state.discordRepositories.find((item) => item.path === draft.path);
+      return {
+        ...draft,
+        project: draft.project?.trim() || undefined,
+        notionDatabaseId: draft.notionDatabaseId?.trim() || undefined,
+        discordChannelId: (override?.discordChannelId ?? draft.discordChannelId)?.trim() || undefined,
+      };
+    });
   try {
     const result = await api.saveSettings({
       HUB_GIT_REPOSITORIES: JSON.stringify(payload),
