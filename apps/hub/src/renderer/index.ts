@@ -1025,10 +1025,21 @@ function buildWorkBranchPicker(options: {
     const target = activeBranches.length > 0 ? activeBranches[0]! : branch;
     void onSwitch(target);
     renderChips();
+    refreshSelectOptions();
     onChange?.(workBranches.slice());
     onActiveChange?.(activeBranches.slice());
   });
   container.appendChild(select);
+  function refreshSelectOptions(): void {
+    const current = select.value;
+    select.innerHTML = "";
+    const placeholderOpt = document.createElement("option");
+    placeholderOpt.value = "";
+    placeholderOpt.textContent = "작업 브랜치 선택…";
+    select.appendChild(placeholderOpt);
+    appendBranchOptions(select, names.filter((branch) => !workBranches.includes(branch)));
+    select.value = current && !workBranches.includes(current) ? current : "";
+  }
   const allRow = document.createElement("label");
   allRow.className = "branch-all-row";
   const allInput = document.createElement("input");
@@ -1105,6 +1116,7 @@ function buildWorkBranchPicker(options: {
         const activeIndex = activeBranches.indexOf(branch);
         if (activeIndex >= 0) activeBranches.splice(activeIndex, 1);
         renderChips();
+        refreshSelectOptions();
         onChange?.(workBranches.slice());
         onActiveChange?.(activeBranches.slice());
       });
