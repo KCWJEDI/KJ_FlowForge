@@ -359,13 +359,15 @@ interface GitCardController {
 let mainGitController: GitCardController | null = null;
 let mainGitPendingPush = false;
 
-function gitErrorSummary(cause: unknown): string {
+function gitErrorSummary(cause: unknown, fromBranch?: string, toBranch?: string): string {
   const message = cause instanceof Error ? cause.message : String(cause);
+  const fromOf = fromBranch ? "'" + fromBranch + "'" : '현재 브랜치';
+  const toOf = toBranch ? "'" + toBranch + "'" : '다른 브랜치';
   if (/overwritten by checkout|would be overwritten/i.test(message)) {
-    return '작업 브랜치를 바꾸기 전에 현재 브랜치의 변경사항을 커밋하거나 스태시해야 합니다. 미저장 변경사항이 새 브랜치에 덮어쓰여질 수 있습니다.';
+    return fromOf + '에서 ' + toOf + '(으)로 전환하지 못했습니다. 현재 브랜치의 미저장 변경사항을 커밋하거나 스태시한 뒤 다시 시도하세요.';
   }
   if (/cannot switch branch/i.test(message)) {
-    return '아직 병합(merge)이 진행 중이라 브랜치를 바꿀 수 없습니다. 병합을 완료하거나 중단한 뒤 다시 시도하세요.';
+    return '브랜치 ' + toOf + ' 전환 시도 중 병합(merge)이 진행 중이라 바꿀 수 없습니다. 병합을 완료하거나 중단한 뒤 다시 시도하세요.';
   }
   return message;
 }
@@ -473,13 +475,18 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
     if (active.length === 0) return;
     const target = active[0]!;
     const git = access.readGit();
-    if (git && git.branch === target) return;
+    const currentBranch = git ? git.branch : '';
+    if (currentBranch === target) {
+      errorEl.textContent = '';
+      return;
+    }
     setBusy(true);
     try {
       access.writeGit(await window.hub.switchGitBranch({ repository: access.repoPath(), branch: target }));
+      errorEl.textContent = '';
       await refresh();
     } catch (cause) {
-      errorEl.textContent = gitErrorSummary(cause);
+      errorEl.textContent = gitErrorSummary(cause, currentBranch, target);
     } finally {
       setBusy(false);
     }
@@ -551,7 +558,13 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
     try {
       const git = access.readGit();
       if (git && git.branch !== active[0]) {
-        access.writeGit(await window.hub.switchGitBranch({ repository: repo, branch: active[0]! }));
+        try {
+          access.writeGit(await window.hub.switchGitBranch({ repository: repo, branch: active[0]! }));
+        } catch (switchCause) {
+          errorEl.textContent = gitErrorSummary(switchCause, git.branch, active[0]!);
+          setStatus('커밋 실패');
+          return;
+        }
       }
       const summaryResult = await window.hub.gitCommit({ repository: repo });
       access.writePendingPush(true);
