@@ -422,7 +422,7 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
     const active = access.readActive().filter((branch) => branch.trim().length > 0);
     const pendingUpstream = access.readGit() ? access.readGit()!.ahead > 0 : false;
     commitBtn.disabled = !hasRepo || !hasChanges || active.length !== 1;
-    pushBtn.disabled = !hasRepo || !access.readPendingPush() || !pendingUpstream || active.length !== 1;
+    pushBtn.disabled = active.length !== 1 || !pendingUpstream;
     if (reportBtn) reportBtn.disabled = !hasRepo || active.length === 0;
   };
 
@@ -1668,6 +1668,7 @@ async function saveNotionSettings(): Promise<void> {
     state.settings = result.settings;
     state.settingsStatuses = result.statuses;
     $.settingsNotionMessage.textContent = "Notion 저장소 설정이 저장되었습니다.";
+    $.settingsNotionMessage.className = "success-text";
     void refreshState();
   } catch (error) {
     $.settingsNotionMessage.textContent = "저장 실패: " + (error instanceof Error ? error.message : String(error));
@@ -1986,6 +1987,7 @@ async function saveDiscordSettings(): Promise<void> {
     state.settings = result.settings;
     state.settingsStatuses = result.statuses;
     $.settingsDiscordMessage.textContent = "Discord 저장소 설정이 저장되었습니다.";
+    $.settingsDiscordMessage.className = "success-text";
     void refreshState();
   } catch (error) {
     $.settingsDiscordMessage.textContent = "저장 실패: " + (error instanceof Error ? error.message : String(error));
