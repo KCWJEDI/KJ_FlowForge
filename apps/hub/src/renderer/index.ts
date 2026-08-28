@@ -420,8 +420,9 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
     const hasRepo = Boolean(access.repoPath());
     const hasChanges = access.readGit() !== null && !access.readClean();
     const active = access.readActive().filter((branch) => branch.trim().length > 0);
+    const pendingUpstream = access.readGit() ? access.readGit()!.ahead > 0 : false;
     commitBtn.disabled = !hasRepo || !hasChanges || active.length !== 1;
-    pushBtn.disabled = !hasRepo || !access.readPendingPush() || active.length !== 1;
+    pushBtn.disabled = !hasRepo || !access.readPendingPush() || !pendingUpstream || active.length !== 1;
     if (reportBtn) reportBtn.disabled = !hasRepo || active.length === 0;
   };
 
@@ -582,11 +583,6 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
     errorEl.textContent = '';
     const repo = access.repoPath();
     if (!repo) { errorEl.textContent = '저장소를 선택하세요.'; return; }
-    const targetRepo = repositorySettingForPath(repo);
-    if (!targetRepo || !targetRepo.notionDatabaseId?.trim() || !targetRepo.discordChannelId?.trim()) {
-      errorEl.textContent = '저장소에 연결되어 있지 않습니다. Notion DB ID와 Discord 채널 ID를 입력하세요.';
-      return;
-    }
     const active = access.readActive().filter((branch) => branch.trim().length > 0);
     if (active.length === 0) { errorEl.textContent = '활성 브랜치를 하나 이상 선택하세요.'; return; }
     setBusy(true);
@@ -1063,7 +1059,17 @@ function buildWorkBranchPicker(options: {
       updateAllInput();
       return;
     }
-    for (const branch of workBranches) {
+    const nameOrder = new Map<string, number>();
+    names.forEach((name, index) => { if (!nameOrder.has(name)) nameOrder.set(name, index); });
+    const orderedBranches = workBranches.slice().sort((a, b) => {
+      const ai = nameOrder.get(a);
+      const bi = nameOrder.get(b);
+      if (ai === undefined && bi === undefined) return 0;
+      if (ai === undefined) return 1;
+      if (bi === undefined) return -1;
+      return ai - bi;
+    });
+    for (const branch of orderedBranches) {
       const label = document.createElement("span");
       const isActive = activeBranches.includes(branch);
       label.className = "branch-option" + (isActive ? " active" : "");
