@@ -287,6 +287,10 @@ function selectedRepository(): string | undefined {
   return value || undefined;
 }
 
+function repositorySettingForPath(path: string): GitRepositorySetting | undefined {
+  return (state.dashboard?.config.repositories ?? []).find((item) => item.path === path);
+}
+
 function persistGitWorkBranches(): void {
   const project = $.dashboardProject.value || "";
   state.gitWorkBranchesByProject[project] = state.gitWorkBranches.slice();
@@ -460,6 +464,11 @@ async function runGitPush(): Promise<void> {
   const repo = selectedRepository();
   if (!repo) {
     setGitError("저장소를 선택하세요.");
+    return;
+  }
+  const targetRepo = repositorySettingForPath(repo);
+  if (!targetRepo || !targetRepo.notionDatabaseId?.trim() || !targetRepo.discordChannelId?.trim()) {
+    setGitError("저장소에 연결되어 있지 않습니다. Notion DB ID와 Discord 채널 ID를 입력하세요.");
     return;
   }
   const branches = state.gitActiveBranches.filter((branch) => branch.trim().length > 0);
@@ -718,6 +727,7 @@ function renderGitBranches(): void {
     persistGitWorkBranches();
     persistGitActiveBranches();
     renderGitBranches();
+    updateGitButtons();
     await syncGitActiveBranch();
   });
   $.gitBranches.appendChild(select);
@@ -776,6 +786,7 @@ function renderGitBranches(): void {
       persistGitWorkBranches();
       persistGitActiveBranches();
       renderGitBranches();
+      updateGitButtons();
     });
     label.appendChild(remove);
     chips.appendChild(label);
@@ -1006,6 +1017,11 @@ function addDashboardGitCard(initialPath?: string): void {
     report.addEventListener("click", async () => {
       if (busy) return;
       try {
+        const targetRepo = repositorySettingForPath(select.value);
+        if (!targetRepo || !targetRepo.notionDatabaseId?.trim() || !targetRepo.discordChannelId?.trim()) {
+          error.textContent = "저장소에 연결되어 있지 않습니다. Notion DB ID와 Discord 채널 ID를 입력하세요.";
+          return;
+        }
         const branches = currentActive();
         if (branches.length === 0) {
           error.textContent = "활성 브랜치를 하나 이상 선택하세요.";
