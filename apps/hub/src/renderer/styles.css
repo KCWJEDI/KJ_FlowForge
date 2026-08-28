@@ -429,8 +429,17 @@ details pre {
   align-items: center;
   gap: 6px;
   margin-top: 8px;
+  width: fit-content;
   color: var(--muted);
   font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.branch-option .branch-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   cursor: pointer;
   user-select: none;
 }

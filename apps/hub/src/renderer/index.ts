@@ -1103,7 +1103,10 @@ function buildWorkBranchPicker(options: {
       });
       const text = document.createElement("span");
       text.textContent = branch;
-      label.append(activeInput, text);
+      const toggle = document.createElement("label");
+      toggle.className = "branch-toggle";
+      toggle.append(activeInput, text);
+      label.append(toggle);
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "chip-remove";
