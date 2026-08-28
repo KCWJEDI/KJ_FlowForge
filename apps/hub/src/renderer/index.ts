@@ -161,9 +161,6 @@ function setStatus(message: string): void {
   $.statusBar.textContent = message;
 }
 
-function setGitError(message: string): void {
-  $.gitError.textContent = message;
-}
 
 function integrationDotMeta(
   key: IntegrationConnectionStatus["integration"],
@@ -279,7 +276,7 @@ function renderGitRepositoryOptions(): void {
   }
   $.gitRepository.value = selected;
   if (selected && selected !== previous && !state.gitBusy) {
-    void refreshGit();
+    if (mainGitController) void mainGitController.refresh();
   }
 }
 function selectedRepository(): string | undefined {
@@ -324,257 +321,337 @@ function restoreProjectActiveBranches(): void {
   }
 }
 
-async function refreshGit(): Promise<void> {
-  setGitError("");
-  state.gitBusy = true;
-  $.gitRefresh.disabled = true;
-  $.gitCommit.disabled = true;
-  $.gitPush.disabled = true;
-  try {
-    const repository = selectedRepository();
-    [state.git, state.gitBranches] = await Promise.all([
-      window.hub.inspectGit(repository),
-      window.hub.listGitBranches(repository),
-    ]);
-    if (state.git && state.git.branch && !state.gitWorkBranches.includes(state.git.branch)) {
-      const project = $.dashboardProject.value || "";
-      const saved = state.gitWorkBranchesByProject[project] ?? [];
-      if (saved.length > 0) {
-        state.gitWorkBranches = saved;
-      } else {
-        // 기존 저장된 작업 브랜치가 없으면 자동으로 채우지 않는다.
-        state.gitWorkBranches = [];
-      }
-    }
-    renderGit();
-  } catch (error) {
-    $.gitSummary.textContent = "Git 사용 불가";
-    state.git = null;
-    state.gitBranches = [];
-    renderGit();
-    setGitError(error instanceof Error ? error.message : String(error));
-  } finally {
-    state.gitBusy = false;
-    $.gitRefresh.disabled = false;
-    updateGitButtons();
-  }
+interface GitCardAccess {
+  repoPath(): string;
+  readGit(): GitStatusView | null;
+  writeGit(git: GitStatusView | null): void;
+  branchNames(): string[];
+  writeBranchNames(branches: string[]): void;
+  readWork(): string[];
+  writeWork(branches: string[]): void;
+  readActive(): string[];
+  writeActive(active: string[]): void;
+  readBusy(): boolean;
+  writeBusy(busy: boolean): void;
+  readClean(): boolean;
+  writeClean(clean: boolean): void;
 }
 
-function renderGit(): void {
-  const git = state.git;
-  renderGitBranches();
-  const empty: GitStatusView = {
-    repository: "",
-    branch: "",
-    head: null,
-    upstream: null,
-    ahead: 0,
-    behind: 0,
-    files: [],
-    conflicts: [],
-    clean: true,
-  };
-  const current = git ?? empty;
-
-  if (git) {
-    const parts = [
-      `브랜치 ${git.branch}`,
-      git.upstream ? `upstream ${git.upstream}` : "upstream 없음",
-      git.ahead > 0 ? `${git.ahead} ahead` : null,
-      git.behind > 0 ? `${git.behind} behind` : null,
-      git.clean ? "변경 없음" : `${git.files.length}개 파일 변경`,
-    ].filter(Boolean);
-    $.gitSummary.textContent = parts.join(" · ");
-  } else {
-    $.gitSummary.textContent = "Git 상태를 불러올 수 없습니다";
-  }
-
-  if (git && git.conflicts.length > 0) {
-    $.gitConflicts.hidden = false;
-    $.gitConflicts.textContent = `병합 충돌: ${git.conflicts.join(", ")}`;
-  } else {
-    $.gitConflicts.hidden = true;
-  }
-
-  const body = $.gitFiles.tBodies[0]!;
-  body.innerHTML = "";
-  for (const file of current.files) {
-    const row = document.createElement("tr");
-    const path = document.createElement("td");
-    path.textContent = file.path;
-    const index = document.createElement("td");
-    index.textContent = file.indexStatus;
-    const workTree = document.createElement("td");
-    workTree.textContent = file.workTreeStatus;
-    row.append(path, index, workTree);
-    body.appendChild(row);
-  }
+interface GitCardDom {
+  repoSelect: HTMLSelectElement;
+  refreshBtn?: HTMLButtonElement;
+  branchesEl: HTMLElement;
+  summary: HTMLElement;
+  conflicts: HTMLElement;
+  table: HTMLTableElement;
+  commitBtn: HTMLButtonElement;
+  pushBtn: HTMLButtonElement;
+  reportBtn?: HTMLButtonElement;
+  errorEl: HTMLElement;
 }
 
-function updateGitButtons(): void {
-  if (state.gitBusy) {
-    $.gitCommit.disabled = true;
-    $.gitPush.disabled = true;
-    $.gitDailyReport.disabled = true;
-    return;
-  }
-  const hasRepo = Boolean(selectedRepository());
-  const hasChanges = state.git !== null && !state.git.clean;
-  const activeBranches = state.gitActiveBranches.filter((branch) => branch.trim().length > 0);
-  const hasActiveBranches = activeBranches.length > 0;
-  $.gitCommit.disabled = !hasRepo || !hasChanges || activeBranches.length !== 1;
-  $.gitPush.disabled = !hasRepo || !hasChanges || activeBranches.length !== 1;
-  $.gitDailyReport.disabled = !hasRepo || !hasActiveBranches;
+interface GitCardController {
+  refresh(): Promise<void>;
 }
 
-async function runGitCommit(): Promise<void> {
-  setGitError("");
-  const repo = selectedRepository();
-  if (!repo) {
-    setGitError("저장소를 선택하세요.");
-    return;
-  }
-  const activeBranches = state.gitActiveBranches.filter((branch) => branch.trim().length > 0);
-  if (activeBranches.length !== 1) {
-    setGitError(activeBranches.length === 0 ? "활성 브랜치를 1개 선택하세요." : "커밋은 활성 브랜치가 정확히 1개일 때만 가능합니다. 다른 브랜치를 비활성화하세요.");
-    return;
-  }
-  state.gitBusy = true;
-  $.gitCommit.disabled = true;
-  $.gitPush.disabled = true;
-  setStatus("변경사항을 요약해 커밋하는 중…");
-  try {
-    if (state.git?.branch !== activeBranches[0]) {
-      await window.hub.switchGitBranch({ repository: repo, branch: activeBranches[0]! });
-    }
-    const summary = await window.hub.gitCommit({ repository: repo });
-    setStatus(`커밋 완료(푸시 대기): ${summary.newHead.slice(0, 8)} — 푸시 버튼을 눌러야 원격에 반영됩니다`);
-    await refreshGit();
-  } catch (error) {
-    setGitError(error instanceof Error ? error.message : String(error));
-    setStatus("커밋 실패");
-  } finally {
-    state.gitBusy = false;
-    updateGitButtons();
-  }
-}
+let mainGitController: GitCardController | null = null;
 
-async function runGitPush(): Promise<void> {
-  setGitError("");
-  const repo = selectedRepository();
-  if (!repo) {
-    setGitError("저장소를 선택하세요.");
-    return;
-  }
-  const targetRepo = repositorySettingForPath(repo);
-  if (!targetRepo || !targetRepo.notionDatabaseId?.trim() || !targetRepo.discordChannelId?.trim()) {
-    setGitError("저장소에 연결되어 있지 않습니다. Notion DB ID와 Discord 채널 ID를 입력하세요.");
-    return;
-  }
-  const branches = state.gitActiveBranches.filter((branch) => branch.trim().length > 0);
-  if (branches.length === 0) {
-    setGitError("활성 브랜치를 하나 이상 선택하세요.");
-    return;
-  }
-  state.gitBusy = true;
-  $.gitCommit.disabled = true;
-  $.gitPush.disabled = true;
-  setStatus("푸시하는 중…");
-  const errors: string[] = [];
-  const pushed: string[] = [];
-  try {
-    for (const branch of branches) {
-      setStatus("푸시하는 중 … " + branch);
-      try {
-        await window.hub.gitPushBranch({ repository: repo, branch });
-        pushed.push(branch);
-      } catch (error) {
-        errors.push(branch + ": " + (error instanceof Error ? error.message : String(error)));
-      }
-    }
-    if (errors.length > 0) setGitError(errors.join("\n"));
-    setStatus(errors.length > 0 ? "푸시 부분 완료 (" + pushed.length + "개 성공)" : "푸시 완료 (" + pushed.join(", ") + ")");
-    await refreshGit();
-  } catch (error) {
-    setGitError(error instanceof Error ? error.message : String(error));
-    setStatus("푸시 실패");
-  } finally {
-    state.gitBusy = false;
-    updateGitButtons();
-  }
-}
-
-async function gitPushActiveBranches(args: { repository: string }): Promise<void> {
-  const active = currentCardActiveBranches(args.repository).filter((branch) => branch.trim().length > 0);
-  if (active.length === 0) throw new Error("활성 브랜치를 하나 이상 선택하세요.");
+async function pushActiveBranches(repository: string, active: string[]): Promise<void> {
+  if (active.length === 0) throw new Error('활성 브랜치를 하나 이상 선택하세요.');
   const errors: string[] = [];
   for (const branch of active) {
     try {
-      await window.hub.gitPushBranch({ repository: args.repository, branch: branch });
+      await window.hub.gitPushBranch({ repository, branch });
     } catch (cause: unknown) {
-      errors.push(branch + ": " + (cause instanceof Error ? cause.message : String(cause)));
+      errors.push(branch + ': ' + (cause instanceof Error ? cause.message : String(cause)));
     }
   }
-  if (errors.length > 0) throw new Error(errors.join("\n"));
+  if (errors.length > 0) throw new Error(errors.join('\n'));
 }
+
 function previousEightIso() {
   const now = new Date();
-  // "당일 08시"을 기준으로, 실제 실행 시각과 무관하게 항상 [전날 08시 ~ 당일 08시) 구간을 만든다.
   const until = new Date(now);
   until.setHours(8, 0, 0, 0);
   const since = new Date(until);
   since.setDate(since.getDate() - 1);
-  const month = String(until.getMonth() + 1).padStart(2, "0");
-  const day = String(until.getDate()).padStart(2, "0");
+  const month = String(until.getMonth() + 1).padStart(2, '0');
+  const day = String(until.getDate()).padStart(2, '0');
   return {
-    date: until.getFullYear() + "-" + month + "-" + day,
+    date: until.getFullYear() + '-' + month + '-' + day,
     sinceIso: since.toISOString(),
     untilIso: until.toISOString(),
   };
 }
 
-async function runGitDailyReport() {
-  setGitError("");
-  const repo = selectedRepository();
-  if (!repo) {
-    setGitError("저장소를 선택하세요.");
-    return;
-  }
-  const branches = state.gitActiveBranches.filter((branch) => branch.trim().length > 0);
-  if (branches.length === 0) {
-    setGitError("활성 브랜치를 하나 이상 선택하세요.");
-    return;
-  }
-  state.gitBusy = true;
-  $.gitCommit.disabled = true;
-  $.gitPush.disabled = true;
-  $.gitDailyReport.disabled = true;
-  const range = previousEightIso();
-  setStatus("전날 08시~당일 08시 커밋을 브랜치별로 요약해 Notion에 등록하는 중…");
-  try {
-    const result = await window.hub.reportManualDailyReport({
-      date: range.date,
-      sinceIso: range.sinceIso,
-      untilIso: range.untilIso,
-      repositories: [repo],
-      branches,
-    });
-    const failed = result.branches.filter((item) => item.status === "failed");
-    if (failed.length > 0) {
-      setGitError(failed.map((item) => item.repositoryLabel + "/" + item.branch + ": " + item.message).join("\n"));
-    } else {
-      setStatus(range.date + " 일일 요약 등록 완료 (브랜치 " + result.branches.length + "개)");
+function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController {
+  const branchesEl = dom.branchesEl;
+  const summary = dom.summary;
+  const conflicts = dom.conflicts;
+  const table = dom.table;
+  const commitBtn = dom.commitBtn;
+  const pushBtn = dom.pushBtn;
+  const reportBtn = dom.reportBtn;
+  const errorEl = dom.errorEl;
+
+  const applyButtonState = (): void => {
+    if (access.readBusy()) {
+      commitBtn.disabled = true;
+      pushBtn.disabled = true;
+      if (reportBtn) reportBtn.disabled = true;
+      return;
     }
-  } catch (error) {
-    setGitError(error instanceof Error ? error.message : String(error));
-    setStatus("일일 요약 등록 실패");
-  } finally {
-    state.gitBusy = false;
-    updateGitButtons();
-    $.gitDailyReport.disabled = false;
-  }
+    const hasRepo = Boolean(access.repoPath());
+    const hasChanges = access.readGit() !== null && !access.readClean();
+    const active = access.readActive().filter((branch) => branch.trim().length > 0);
+    commitBtn.disabled = !hasRepo || !hasChanges || active.length !== 1;
+    pushBtn.disabled = !hasRepo || !hasChanges || active.length !== 1;
+    if (reportBtn) reportBtn.disabled = !hasRepo || active.length === 0;
+  };
+
+  const setBusy = (value: boolean): void => {
+    access.writeBusy(value);
+    commitBtn.disabled = value;
+    pushBtn.disabled = value;
+    if (reportBtn) reportBtn.disabled = value;
+    dom.repoSelect.disabled = value;
+    if (dom.refreshBtn) dom.refreshBtn.disabled = value;
+    if (!value) applyButtonState();
+  };
+
+  const renderGitView = (git: GitStatusView | null): void => {
+    if (git) {
+      const parts = [
+        '브랜치 ' + git.branch,
+        git.upstream ? 'upstream ' + git.upstream : 'upstream 없음',
+        git.ahead > 0 ? git.ahead + ' ahead' : null,
+        git.behind > 0 ? git.behind + ' behind' : null,
+        git.clean ? '변경 없음' : git.files.length + '개 파일 변경',
+      ].filter(Boolean);
+      summary.textContent = parts.join(' · ');
+    } else {
+      summary.textContent = 'Git 상태를 불러올 수 없습니다';
+    }
+    const hasConflicts = Boolean(git && git.conflicts.length > 0);
+    conflicts.hidden = !hasConflicts;
+    conflicts.textContent = hasConflicts && git ? '병합 충돌: ' + git.conflicts.join(', ') : '';
+    const body = table.tBodies[0];
+    if (body) body.innerHTML = '';
+    const files = git ? git.files : [];
+    if (body) {
+      for (const file of files) {
+        const row = document.createElement('tr');
+        const path = document.createElement('td');
+        path.textContent = file.path;
+        const index = document.createElement('td');
+        index.textContent = file.indexStatus;
+        const workTree = document.createElement('td');
+        workTree.textContent = file.workTreeStatus;
+        row.append(path, index, workTree);
+        body.appendChild(row);
+      }
+    }
+    access.writeClean(git ? git.clean : true);
+  };
+
+  const syncActiveBranch = async (): Promise<void> => {
+    const active = access.readActive().filter((branch) => branch.trim().length > 0);
+    if (active.length === 0) return;
+    const target = active[0]!;
+    const git = access.readGit();
+    if (git && git.branch === target) return;
+    setBusy(true);
+    try {
+      access.writeGit(await window.hub.switchGitBranch({ repository: access.repoPath(), branch: target }));
+      await refresh();
+    } catch (cause) {
+      errorEl.textContent = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const renderBranches = (): void => {
+    buildWorkBranchPicker({
+      container: branchesEl,
+      names: access.branchNames(),
+      current: access.readGit() ? access.readGit()!.branch : '',
+      selected: access.readWork(),
+      active: access.readActive(),
+      onSwitch: () => syncActiveBranch(),
+      onChange: (list) => {
+        access.writeWork(list.slice());
+        applyButtonState();
+        void syncActiveBranch();
+      },
+      onActiveChange: (active) => {
+        access.writeActive(active.slice());
+        applyButtonState();
+        void syncActiveBranch();
+      },
+    });
+  };
+
+  const refresh = async (): Promise<void> => {
+    errorEl.textContent = '';
+    const repo = access.repoPath();
+    if (!repo) {
+      summary.textContent = '저장소를 선택하세요.';
+      access.writeGit(null);
+      access.writeBranchNames([]);
+      renderGitView(null);
+      renderBranches();
+      applyButtonState();
+      return;
+    }
+    setBusy(true);
+    try {
+      const [git, names] = await Promise.all([window.hub.inspectGit(repo), window.hub.listGitBranches(repo)]);
+      access.writeGit(git);
+      access.writeBranchNames(names);
+      renderGitView(git);
+      renderBranches();
+    } catch (cause) {
+      summary.textContent = 'Git 사용 불가';
+      access.writeGit(null);
+      access.writeBranchNames([]);
+      renderGitView(null);
+      renderBranches();
+      errorEl.textContent = cause instanceof Error ? cause.message : String(cause);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runCommit = async (): Promise<void> => {
+    errorEl.textContent = '';
+    const repo = access.repoPath();
+    if (!repo) { errorEl.textContent = '저장소를 선택하세요.'; return; }
+    const active = access.readActive().filter((branch) => branch.trim().length > 0);
+    if (active.length !== 1) {
+      errorEl.textContent = active.length === 0 ? '활성 브랜치를 1개 선택하세요.' : '커밋은 활성 브랜치가 정확히 1개일 때만 가능합니다. 다른 브랜치를 비활성화하세요.';
+      return;
+    }
+    setBusy(true);
+    setStatus('변경사항을 요약해 커밋하는 중…');
+    try {
+      const git = access.readGit();
+      if (git && git.branch !== active[0]) {
+        access.writeGit(await window.hub.switchGitBranch({ repository: repo, branch: active[0]! }));
+      }
+      const summaryResult = await window.hub.gitCommit({ repository: repo });
+      setStatus('커밋 완료(푸시 대기): ' + summaryResult.newHead.slice(0, 8) + ' — 푸시 버튼을 눌러야 원격에 반영됩니다');
+      await refresh();
+    } catch (cause) {
+      errorEl.textContent = cause instanceof Error ? cause.message : String(cause);
+      setStatus('커밋 실패');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runPush = async (): Promise<void> => {
+    errorEl.textContent = '';
+    const repo = access.repoPath();
+    if (!repo) { errorEl.textContent = '저장소를 선택하세요.'; return; }
+    const targetRepo = repositorySettingForPath(repo);
+    if (!targetRepo || !targetRepo.notionDatabaseId?.trim() || !targetRepo.discordChannelId?.trim()) {
+      errorEl.textContent = '저장소에 연결되어 있지 않습니다. Notion DB ID와 Discord 채널 ID를 입력하세요.';
+      return;
+    }
+    const active = access.readActive().filter((branch) => branch.trim().length > 0);
+    if (active.length === 0) { errorEl.textContent = '활성 브랜치를 하나 이상 선택하세요.'; return; }
+    setBusy(true);
+    setStatus('푸시하는 중…');
+    try {
+      await pushActiveBranches(repo, active);
+      setStatus('푸시 완료 (' + active.join(', ') + ')');
+      await refresh();
+    } catch (cause) {
+      errorEl.textContent = cause instanceof Error ? cause.message : String(cause);
+      setStatus('푸시 실패');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runDailyReport = async (): Promise<void> => {
+    if (!reportBtn) return;
+    errorEl.textContent = '';
+    const repo = access.repoPath();
+    if (!repo) { errorEl.textContent = '저장소를 선택하세요.'; return; }
+    const targetRepo = repositorySettingForPath(repo);
+    if (!targetRepo || !targetRepo.notionDatabaseId?.trim() || !targetRepo.discordChannelId?.trim()) {
+      errorEl.textContent = '저장소에 연결되어 있지 않습니다. Notion DB ID와 Discord 채널 ID를 입력하세요.';
+      return;
+    }
+    const branches = access.readActive().filter((branch) => branch.trim().length > 0);
+    if (branches.length === 0) { errorEl.textContent = '활성 브랜치를 하나 이상 선택하세요.'; return; }
+    setBusy(true);
+    const range = previousEightIso();
+    setStatus('전날 08시~당일 08시 커밋을 브랜치별로 요약해 Notion에 등록하는 중…');
+    try {
+      const result = await window.hub.reportManualDailyReport({
+        date: range.date,
+        sinceIso: range.sinceIso,
+        untilIso: range.untilIso,
+        repositories: [repo],
+        branches,
+      });
+      const failed = result.branches.filter((item) => item.status === 'failed');
+      if (failed.length > 0) {
+        errorEl.textContent = failed.map((item) => item.repositoryLabel + '/' + item.branch + ': ' + item.message).join('\n');
+      } else {
+        setStatus(range.date + ' 일일 요약 등록 완료 (브랜치 ' + result.branches.length + '개)');
+      }
+    } catch (cause) {
+      errorEl.textContent = cause instanceof Error ? cause.message : String(cause);
+      setStatus('일일 요약 등록 실패');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  dom.repoSelect.addEventListener('change', () => void refresh());
+  if (dom.refreshBtn) dom.refreshBtn.addEventListener('click', () => void refresh());
+  commitBtn.addEventListener('click', () => void runCommit());
+  pushBtn.addEventListener('click', () => void runPush());
+  if (reportBtn) reportBtn.addEventListener('click', () => void runDailyReport());
+
+  return { refresh };
 }
 
+function mountDashboardMainGitCard(): GitCardController {
+  const access: GitCardAccess = {
+    repoPath: () => selectedRepository() ?? '',
+    readGit: () => state.git,
+    writeGit: (git) => { state.git = git; },
+    branchNames: () => state.gitBranches,
+    writeBranchNames: (branches) => { state.gitBranches = branches; },
+    readWork: () => state.gitWorkBranches,
+    writeWork: (branches) => { state.gitWorkBranches = branches; persistGitWorkBranches(); },
+    readActive: () => state.gitActiveBranches,
+    writeActive: (active) => { state.gitActiveBranches = active; persistGitActiveBranches(); },
+    readBusy: () => state.gitBusy,
+    writeBusy: (busy) => { state.gitBusy = busy; },
+    readClean: () => (state.git ? state.git.clean : true),
+    writeClean: () => {},
+  };
+  const controller = mountGitCard({
+    repoSelect: $.gitRepository,
+    refreshBtn: $.gitRefresh,
+    branchesEl: $.gitBranches,
+    summary: $.gitSummary,
+    conflicts: $.gitConflicts,
+    table: $.gitFiles,
+    commitBtn: $.gitCommit,
+    pushBtn: $.gitPush,
+    reportBtn: $.gitDailyReport,
+    errorEl: $.gitError,
+  }, access);
+  mainGitController = controller;
+  return controller;
+}
 function renderDailyAutomation(view: DailyAutomationView): void {
   $.automationEnabled.checked = view.enabled;
   $.automationState.textContent = view.running ? "실행 중" : view.enabled ? "활성" : "비활성";
@@ -689,111 +766,6 @@ function renderDashboard(dashboard: DashboardState): void {
   renderDailyAutomation(dashboard.dailyAutomation);
 }
 
-function renderGitBranches(): void {
-  $.gitBranches.innerHTML = "";
-  if (state.gitBranches.length === 0) {
-    $.gitBranches.textContent = "선택 가능한 로컬 브랜치가 없습니다.";
-    return;
-  }
-  const select = document.createElement("select");
-  select.className = "branch-select";
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "작업 브랜치 선택…";
-  select.appendChild(placeholder);
-  appendBranchOptions(select, state.gitBranches.filter((branch) => !state.gitWorkBranches.includes(branch)));
-  const syncGitActiveBranch = async (): Promise<void> => {
-    const active = state.gitActiveBranches.filter((branch) => branch.trim().length > 0);
-    if (active.length === 0) return;
-    const target = active[0]!;
-    if (state.git && state.git.branch === target) return;
-    state.gitBusy = true;
-    try {
-      state.git = await window.hub.switchGitBranch({ repository: selectedRepository(), branch: target });
-      await refreshGit();
-    } catch (error) {
-      setGitError(error instanceof Error ? error.message : String(error));
-      renderGitBranches();
-    } finally {
-      state.gitBusy = false;
-    }
-  };
-  select.addEventListener("change", async () => {
-    const branch = select.value;
-    select.value = "";
-    if (!branch || state.gitWorkBranches.includes(branch)) return;
-    state.gitWorkBranches.push(branch);
-    if (!state.gitActiveBranches.includes(branch)) state.gitActiveBranches.push(branch);
-    persistGitWorkBranches();
-    persistGitActiveBranches();
-    renderGitBranches();
-    updateGitButtons();
-    await syncGitActiveBranch();
-  });
-  $.gitBranches.appendChild(select);
-  const allRow = document.createElement("label");
-  allRow.className = "branch-all-row";
-  const allInput = document.createElement("input");
-  allInput.type = "checkbox";
-  allInput.checked = state.gitWorkBranches.length > 0 && state.gitActiveBranches.length === state.gitWorkBranches.length;
-  allInput.title = "전체 선택";
-  allInput.addEventListener("change", () => {
-    state.gitActiveBranches = allInput.checked ? state.gitWorkBranches.slice() : [];
-    persistGitActiveBranches();
-    renderGitBranches();
-    updateGitButtons();
-    void syncGitActiveBranch();
-  });
-  const allText = document.createElement("span");
-  allText.textContent = "전체 선택";
-  allRow.append(allInput, allText);
-  $.gitBranches.appendChild(allRow);
-  const chips = document.createElement("div");
-  chips.className = "branch-options";
-  for (const branch of state.gitWorkBranches) {
-    const isActive = state.gitActiveBranches.includes(branch);
-    const label = document.createElement("span");
-    label.className = isActive ? "branch-option active" : "branch-option";
-    const activeInput = document.createElement("input");
-    activeInput.type = "checkbox";
-    activeInput.className = "branch-active-cb";
-    activeInput.checked = isActive;
-    activeInput.title = "활성/비활성";
-    activeInput.addEventListener("change", (event) => {
-      event.stopPropagation();
-      if (activeInput.checked) {
-        if (!state.gitActiveBranches.includes(branch)) state.gitActiveBranches.push(branch);
-      } else {
-        state.gitActiveBranches = state.gitActiveBranches.filter((value) => value !== branch);
-      }
-      persistGitActiveBranches();
-      renderGitBranches();
-      updateGitButtons();
-      void syncGitActiveBranch();
-    });
-    const text = document.createElement("span");
-    text.textContent = branch;
-    label.append(activeInput, text);
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "chip-remove";
-    remove.textContent = "×";
-    remove.title = "작업 브랜치에서 제거";
-    remove.addEventListener("click", (event) => {
-      event.stopPropagation();
-      state.gitWorkBranches = state.gitWorkBranches.filter((value) => value !== branch);
-      state.gitActiveBranches = state.gitActiveBranches.filter((value) => value !== branch);
-      persistGitWorkBranches();
-      persistGitActiveBranches();
-      renderGitBranches();
-      updateGitButtons();
-    });
-    label.appendChild(remove);
-    chips.appendChild(label);
-  }
-  $.gitBranches.appendChild(chips);
-}
-
 function appendBranchOptions(select: HTMLSelectElement, branches: string[]): void {
   const groups = new Map<string, string[]>();
   for (const branch of branches) {
@@ -891,173 +863,83 @@ function addDashboardGitCard(initialPath?: string): void {
   const project = $.dashboardProject.value;
   const repositories = (state.dashboard?.config.repositories ?? []).filter((item) => projectName(item.project) === project);
   if (repositories.length === 0) {
-    setStatus("현재 프로젝트에 추가된 Git 저장소가 없습니다.");
+    setStatus('현재 프로젝트에 추가된 Git 저장소가 없습니다.');
     return;
   }
-  const primary = $.gitRepository.closest<HTMLElement>(".card");
+  const primary = $.gitRepository.closest<HTMLElement>('.card');
   if (!primary) return;
   const card = primary.cloneNode(true) as HTMLElement;
-  card.classList.add("dashboard-extra-card");
-  card.querySelectorAll<HTMLElement>("[id]").forEach((element) => element.removeAttribute("id"));
+  card.classList.add('dashboard-extra-card');
+  card.querySelectorAll<HTMLElement>('[id]').forEach((element) => element.removeAttribute('id'));
   trackCardFocus(card);
-  const select = card.querySelector<HTMLSelectElement>("select")!;
-  const refresh = card.querySelector<HTMLButtonElement>(".card-head button")!;
-  const branches = card.querySelector<HTMLElement>(".git-branch-picker")!;
-  branches.innerHTML = "";
-  const summary = card.querySelector<HTMLElement>(".muted")!;
-  const conflicts = card.querySelector<HTMLElement>(".conflicts")!;
-  const table = card.querySelector<HTMLTableElement>("table")!;
-  const buttons = card.querySelectorAll<HTMLButtonElement>(".row button");
+  const select = card.querySelector<HTMLSelectElement>('select')!;
+  const refresh = card.querySelector<HTMLButtonElement>('.card-head button')!;
+  const branches = card.querySelector<HTMLElement>('.git-branch-picker')!;
+  branches.innerHTML = '';
+  const summary = card.querySelector<HTMLElement>('.muted')!;
+  const conflicts = card.querySelector<HTMLElement>('.conflicts')!;
+  const table = card.querySelector<HTMLTableElement>('table')!;
+  const buttons = card.querySelectorAll<HTMLButtonElement>('.row button');
   const commit = buttons[0]!;
   const push = buttons[1]!;
   const report = buttons[2] as HTMLButtonElement | undefined;
-  push.classList.add("push-button");
-  const error = card.querySelector<HTMLElement>(".error-text")!;
-  select.innerHTML = "";
-  let preselected = "";
+  push.classList.add('push-button');
+  const error = card.querySelector<HTMLElement>('.error-text')!;
+  select.innerHTML = '';
+  let preselected = '';
   for (const repository of repositories) {
-    const option = document.createElement("option");
+    const option = document.createElement('option');
     option.value = repository.path;
-    option.textContent = `${repository.label || "저장소"} · ${repository.username || "KCWJEDI"} · ${repository.path}`;
+    option.textContent = (repository.label || '저장소') + ' · ' + (repository.username || 'KCWJEDI') + ' · ' + repository.path;
     select.appendChild(option);
     if (initialPath && repository.path === initialPath) preselected = repository.path;
   }
   if (preselected) select.value = preselected;
   let busy = false;
   let clean = true;
-  const currentActive = (): string[] => currentCardActiveBranches(select.value).filter((branch) => branch.trim().length > 0);
- const applyCardButtonState = (): void => {
-   if (busy) return;
-    const active = currentActive();
-    commit.disabled = active.length !== 1 || clean;
-    push.disabled = active.length !== 1 || clean;
-    if (report) report.disabled = active.length === 0;
+  let cardGitCache: GitStatusView | null = null;
+  let cardBranchNames: string[] = [];
+  const path = (): string => select.value || '';
+  const access: GitCardAccess = {
+    repoPath: path,
+    readGit: () => cardGitCache,
+    writeGit: (git) => { cardGitCache = git; },
+    branchNames: () => cardBranchNames,
+    writeBranchNames: (branches) => { cardBranchNames = branches; },
+    readWork: () => currentCardBranches(path()),
+    writeWork: (list) => saveCardBranches(path(), list),
+    readActive: () => currentCardActiveBranches(path()),
+    writeActive: (list) => saveCardActiveBranches(path(), list),
+    readBusy: () => busy,
+    writeBusy: (value) => { busy = value; },
+    readClean: () => clean,
+    writeClean: (value) => { clean = value; },
   };
-  const setBusy = (value: boolean): void => {
-    busy = value;
-    commit.disabled = value;
-    push.disabled = value;
-    if (report) report.disabled = value;
-    if (!value) applyCardButtonState();
-  };
- const render = async (): Promise<void> => {
-    error.textContent = "";
-    try {
-      const [git, names] = await Promise.all([window.hub.inspectGit(select.value), window.hub.listGitBranches(select.value)]);
-      summary.textContent = `브랜치 ${git.branch} · ${git.clean ? "변경 없음" : `${git.files.length}개 파일 변경`}`;
-      conflicts.hidden = git.conflicts.length === 0;
-      conflicts.textContent = git.conflicts.length ? `병합 충돌: ${git.conflicts.join(", ")}` : "";
-      clean = git.clean;
-      buildWorkBranchPicker({
-        container: branches,
-        names,
-        current: git.branch,
-        selected: currentCardBranches(select.value),
-        active: currentCardActiveBranches(select.value),
-        onSwitch: async (branch) => {
-          setBusy(true);
-          try { await window.hub.switchGitBranch({ repository: select.value, branch }); await render(); }
-          catch (cause) { error.textContent = cause instanceof Error ? cause.message : String(cause); }
-          finally { setBusy(false); }
-        },
-        onChange: (list) => saveCardBranches(select.value, list),
-        onActiveChange: (active) => {
-          saveCardActiveBranches(select.value, active);
-          void render();
-          applyCardButtonState();
-        },
-      });
-      const body = table.tBodies[0]!;
-      body.innerHTML = "";
-      for (const file of git.files) {
-        const row = body.insertRow();
-        row.insertCell().textContent = file.path;
-        row.insertCell().textContent = file.indexStatus;
-        row.insertCell().textContent = file.workTreeStatus;
-      }
-      applyCardButtonState();
-    } catch (cause) {
-      error.textContent = cause instanceof Error ? cause.message : String(cause);
-    }
-  };
-  select.addEventListener("change", () => void render());
-  refresh.addEventListener("click", () => void render());
-  commit.addEventListener("click", async () => {
-    if (busy) return;
-    try {
-      const active = currentActive();
-      if (active.length !== 1) {
-        error.textContent = active.length === 0 ? "활성 브랜치를 1개 선택하세요." : "커밋은 활성 브랜치가 정확히 1개일 때만 가능합니다.";
-        return;
-      }
-      setBusy(true);
-      const git = await window.hub.inspectGit(select.value);
-      if (git.branch !== active[0]) await window.hub.switchGitBranch({ repository: select.value, branch: active[0]! });
-      await window.hub.gitCommit({ repository: select.value });
-      setStatus("커밋 완료(푸시 대기): " + active[0] + " — 푸시 버튼을 눌러야 원격에 반영됩니다");
-      await render();
-      setBusy(false);
-    }
-    catch (cause) { setBusy(false); error.textContent = cause instanceof Error ? cause.message : String(cause); }
-  });
-  push.addEventListener("click", async () => {
-    if (busy) return;
-    try {
-      const active = currentActive();
-      if (active.length === 0) { error.textContent = "활성 브랜치를 하나 이상 선택하세요."; return; }
-      setBusy(true);
-      await gitPushActiveBranches({ repository: select.value });
-      setStatus("푸시 완료 (" + active.join(", ") + ")");
-      await render();
-      setBusy(false);
-    }
-    catch (cause) { setBusy(false); error.textContent = cause instanceof Error ? cause.message : String(cause); }
-  });
-  if (report) {
-    report.addEventListener("click", async () => {
-      if (busy) return;
-      try {
-        const targetRepo = repositorySettingForPath(select.value);
-        if (!targetRepo || !targetRepo.notionDatabaseId?.trim() || !targetRepo.discordChannelId?.trim()) {
-          error.textContent = "저장소에 연결되어 있지 않습니다. Notion DB ID와 Discord 채널 ID를 입력하세요.";
-          return;
-        }
-        const branches = currentActive();
-        if (branches.length === 0) {
-          error.textContent = "활성 브랜치를 하나 이상 선택하세요.";
-          return;
-        }
-        setBusy(true);
-        const range = previousEightIso();
-        const result = await window.hub.reportManualDailyReport({
-          date: range.date,
-          sinceIso: range.sinceIso,
-          untilIso: range.untilIso,
-          repositories: [select.value],
-          branches,
-        });
-        const failed = result.branches.filter((item) => item.status === "failed");
-        error.textContent = failed.map((item) => item.repositoryLabel + "/" + item.branch + ": " + item.message).join("\n");
-        if (failed.length === 0) setStatus(range.date + " 일일 요약 등록 완료 (브랜치 " + branches.length + "개)");
-        setBusy(false);
-      } catch (cause) {
-        setBusy(false); error.textContent = cause instanceof Error ? cause.message : String(cause);
-      }
-    });
-  }
-  const removeButton = document.createElement("button");
-  removeButton.type = "button";
-  removeButton.className = "ghost danger";
-  removeButton.textContent = "카드 삭제";
-  removeButton.addEventListener("click", () => {
+  const controller = mountGitCard({
+    repoSelect: select,
+    refreshBtn: refresh,
+    branchesEl: branches,
+    summary: summary,
+    conflicts: conflicts,
+    table: table,
+    commitBtn: commit,
+    pushBtn: push,
+    reportBtn: report,
+    errorEl: error,
+  }, access);
+  const removeButton = document.createElement('button');
+  removeButton.type = 'button';
+  removeButton.className = 'ghost danger';
+  removeButton.textContent = '카드 삭제';
+  removeButton.addEventListener('click', () => {
     const project = currentlySelectedProject();
     const cards = state.gitCardsByProject[project] ?? [];
-    state.gitCardsByProject[project] = cards.filter((item) => item.path !== select.value);
+    state.gitCardsByProject[project] = cards.filter((item) => item.path !== path());
     card.remove();
   });
-  card.querySelector(".card-head")!.append(removeButton);
+  card.querySelector('.card-head')!.append(removeButton);
   $.dashboardAddCard.before(card);
-  void render();
+  void controller.refresh();
 }
 
 function restoreDashboardGitCards(): void {
@@ -2134,12 +2016,8 @@ function scheduleAutoSave(): void {
 function bindEvents(): void {
   const primaryCard = $.gitRepository.closest<HTMLElement>(".card");
   if (primaryCard) trackCardFocus(primaryCard);
+  mountDashboardMainGitCard();
   $.refreshState.addEventListener("click", () => void refreshState());
-  $.gitRefresh.addEventListener("click", () => void refreshGit());
-  $.gitRepository.addEventListener("change", () => void refreshGit());
-  $.gitCommit.addEventListener("click", () => void runGitCommit());
-  $.gitPush.addEventListener("click", () => void runGitPush());
-  $.gitDailyReport.addEventListener("click", () => void runGitDailyReport());
   $.mainTabDashboard.addEventListener("click", () => switchMainPanel("dashboard"));
   $.mainTabAutomation.addEventListener("click", () => switchMainPanel("automation"));
   $.mainTabSettings.addEventListener("click", () => switchMainPanel("settings"));
@@ -2148,7 +2026,7 @@ function bindEvents(): void {
     restoreProjectWorkBranches();
     restoreProjectActiveBranches();
     renderGitRepositoryOptions();
-    void refreshGit();
+    if (mainGitController) void mainGitController.refresh();
     restoreDashboardGitCards();
   });
   $.dashboardProjectRename.addEventListener("click", async () => {
@@ -2226,7 +2104,7 @@ async function init(): Promise<void> {
   state.gitWorkBranches = [];
   restoreProjectWorkBranches();
   restoreProjectActiveBranches();
-  void refreshGit();
+  if (mainGitController) void mainGitController.refresh();
   if (settingsHub()) {
     void refreshSettings();
   } else {
