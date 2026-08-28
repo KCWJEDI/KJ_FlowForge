@@ -335,6 +335,8 @@ interface GitCardAccess {
   writeBusy(busy: boolean): void;
   readClean(): boolean;
   writeClean(clean: boolean): void;
+  readPendingPush(): boolean;
+  writePendingPush(pending: boolean): void;
 }
 
 interface GitCardDom {
@@ -355,6 +357,7 @@ interface GitCardController {
 }
 
 let mainGitController: GitCardController | null = null;
+let mainGitPendingPush = false;
 
 async function pushActiveBranches(repository: string, active: string[]): Promise<void> {
   if (active.length === 0) throw new Error('활성 브랜치를 하나 이상 선택하세요.');
@@ -405,7 +408,7 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
     const hasChanges = access.readGit() !== null && !access.readClean();
     const active = access.readActive().filter((branch) => branch.trim().length > 0);
     commitBtn.disabled = !hasRepo || !hasChanges || active.length !== 1;
-    pushBtn.disabled = !hasRepo || !hasChanges || active.length !== 1;
+    pushBtn.disabled = !hasRepo || !access.readPendingPush() || active.length !== 1;
     if (reportBtn) reportBtn.disabled = !hasRepo || active.length === 0;
   };
 
@@ -540,6 +543,7 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
         access.writeGit(await window.hub.switchGitBranch({ repository: repo, branch: active[0]! }));
       }
       const summaryResult = await window.hub.gitCommit({ repository: repo });
+      access.writePendingPush(true);
       setStatus('커밋 완료(푸시 대기): ' + summaryResult.newHead.slice(0, 8) + ' — 푸시 버튼을 눌러야 원격에 반영됩니다');
       await refresh();
     } catch (cause) {
@@ -565,6 +569,7 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
     setStatus('푸시하는 중…');
     try {
       await pushActiveBranches(repo, active);
+      access.writePendingPush(false);
       setStatus('푸시 완료 (' + active.join(', ') + ')');
       await refresh();
     } catch (cause) {
@@ -636,6 +641,8 @@ function mountDashboardMainGitCard(): GitCardController {
     writeBusy: (busy) => { state.gitBusy = busy; },
     readClean: () => (state.git ? state.git.clean : true),
     writeClean: () => {},
+    readPendingPush: () => mainGitPendingPush,
+    writePendingPush: (pending) => { mainGitPendingPush = pending; },
   };
   const controller = mountGitCard({
     repoSelect: $.gitRepository,
@@ -897,6 +904,7 @@ function addDashboardGitCard(initialPath?: string): void {
   if (preselected) select.value = preselected;
   let busy = false;
   let clean = true;
+  let cardPendingPush = false;
   let cardGitCache: GitStatusView | null = null;
   let cardBranchNames: string[] = [];
   const path = (): string => select.value || '';
@@ -914,6 +922,8 @@ function addDashboardGitCard(initialPath?: string): void {
     writeBusy: (value) => { busy = value; },
     readClean: () => clean,
     writeClean: (value) => { clean = value; },
+    readPendingPush: () => cardPendingPush,
+    writePendingPush: (pending) => { cardPendingPush = pending; },
   };
   const controller = mountGitCard({
     repoSelect: select,
