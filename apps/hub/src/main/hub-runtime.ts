@@ -305,7 +305,18 @@ export class HubRuntime extends EventEmitter {
               discordChannelId: typeof item?.discordChannelId === "string" ? item.discordChannelId.trim() : "",
             });
           }
-          updates.HUB_GIT_REPOSITORIES = JSON.stringify(validated);
+          if (validated.length === 0 && !explicitRepositoryClear) {
+            // 빈 배열("[]")은 여러 저장 경로(자동저장·Notion·Discord)에서 기존 목록을
+            // 의도치 않게 덮어쓰는 원인이 되므로, 명시적 삭제가 아닌 경우 기존 저장소를 유지합니다.
+            const existing = current.get("HUB_GIT_REPOSITORIES")?.trim();
+            if (existing) {
+              delete updates.HUB_GIT_REPOSITORIES;
+            } else {
+              updates.HUB_GIT_REPOSITORIES = "[]";
+            }
+          } else {
+            updates.HUB_GIT_REPOSITORIES = JSON.stringify(validated);
+          }
         } catch (error) {
           // 손상된 저장소 JSON은 다른 설정 저장을 막지 않도록 이전 값을 유지합니다.
           delete updates.HUB_GIT_REPOSITORIES;

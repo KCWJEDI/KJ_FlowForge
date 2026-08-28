@@ -1029,7 +1029,10 @@ function buildWorkBranchPicker(options: {
     onChange?.(workBranches.slice());
     onActiveChange?.(activeBranches.slice());
   });
-  container.appendChild(select);
+  const topRow = document.createElement("div");
+  topRow.className = "branch-top-row";
+  topRow.appendChild(select);
+  container.appendChild(topRow);
   function refreshSelectOptions(): void {
     const current = select.value;
     select.innerHTML = "";
@@ -1056,7 +1059,7 @@ function buildWorkBranchPicker(options: {
   const allText = document.createElement("span");
   allText.textContent = "전체 선택";
   allRow.append(allInput, allText);
-  container.appendChild(allRow);
+  topRow.appendChild(allRow);
   const chips = document.createElement("div");
   chips.className = "branch-options";
   container.appendChild(chips);
@@ -1631,7 +1634,11 @@ async function saveRepositories(): Promise<void> {
       discordChannelId: draft.discordChannelId?.trim() || undefined,
     }));
   try {
-    const result = await api.saveSettings({ HUB_GIT_REPOSITORIES: JSON.stringify(payload) });
+    const result = await api.saveSettings({
+      HUB_GIT_REPOSITORIES: JSON.stringify(payload),
+      // Git 저장소 탭에서 '저장'을 누른 것은 명시적이므로, 빈 목록일 경우 저장소 삭제로 취급합니다.
+      ...(payload.length === 0 ? { HUB_GIT_REPOSITORIES_CLEAR: "1" } : {}),
+    });
     state.settings = result.settings;
     state.settingsStatuses = result.statuses;
     $.settingsRepositoriesMessage.textContent = "저장소 설정이 저장되었습니다.";

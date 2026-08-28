@@ -424,16 +424,30 @@ details pre {
   color: var(--danger);
 }
 
+.branch-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .branch-all-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
-  width: fit-content;
+  flex-shrink: 0;
   color: var(--muted);
   font-size: 12px;
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
+}
+
+.branch-all-row input[type="checkbox"],
+.branch-option .branch-active-cb {
+  width: auto;
+  flex: 0 0 auto;
+  margin: 0;
 }
 
 .branch-option .branch-toggle {
