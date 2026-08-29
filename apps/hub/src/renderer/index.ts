@@ -117,7 +117,7 @@ const state: {
   gitWorkBranchesByProject: Record<string, string[]>;
   gitActiveBranches: string[];
   gitActiveBranchesByProject: Record<string, string[]>;
-  gitCardsByProject: Record<string, Array<{ path: string; workBranches: string[]; activeBranches: string[] }>>;
+  gitCardsByProject: Record<string, Array<{ id: string; path: string; workBranches: string[]; activeBranches: string[] }>>;
   settings: SettingsView | null;
   settingsStatuses: IntegrationConnectionStatus[];
   settingsBusy: boolean;
@@ -307,6 +307,9 @@ function restoreProjectWorkBranches(): void {
   const saved = state.gitWorkBranchesByProject[project];
   if (saved && saved.length > 0) {
     state.gitWorkBranches = saved.slice();
+  } else {
+    // 저장된 작업 브랜치가 없으면 빈 상태로 초기화해 이전 프로젝트의 브랜치가 남지 않게 한다.
+    state.gitWorkBranches = [];
   }
 }
 
@@ -830,41 +833,67 @@ function projectName(value?: string): string {
   return value?.trim() || "미지정 프로젝트";
 }
 
-function currentCardBranches(path: string): string[] {
+interface CardEntry {
+  id: string;
+  path: string;
+  workBranches: string[];
+  activeBranches: string[];
+}
+
+function currentCardBranches(id: string): string[] {
   const project = currentlySelectedProject();
   const cards = state.gitCardsByProject[project] ?? [];
-  const found = cards.find((item) => item.path === path);
+  const found = cards.find((item) => item.id === id);
   return found ? found.workBranches.slice() : [];
 }
 
-function saveCardBranches(path: string, branches: string[]): void {
+function saveCardBranches(id: string, branches: string[]): void {
   const project = currentlySelectedProject();
   const cards = state.gitCardsByProject[project] ?? [];
-  let found = cards.find((item) => item.path === path);
+  const found = cards.find((item) => item.id === id);
   if (found) {
     found.workBranches = branches.slice();
-  } else {
-    state.gitCardsByProject[project] = [...cards, { path, workBranches: branches.slice(), activeBranches: branches.slice() }];
   }
 }
 
-function currentCardActiveBranches(path: string): string[] {
+function currentCardActiveBranches(id: string): string[] {
   const project = currentlySelectedProject();
   const cards = state.gitCardsByProject[project] ?? [];
-  const found = cards.find((item) => item.path === path);
+  const found = cards.find((item) => item.id === id);
   return found ? found.activeBranches.slice() : [];
 }
 
-function saveCardActiveBranches(path: string, active: string[]): void {
+function saveCardActiveBranches(id: string, active: string[]): void {
   const project = currentlySelectedProject();
   const cards = state.gitCardsByProject[project] ?? [];
-  let found = cards.find((item) => item.path === path);
+  const found = cards.find((item) => item.id === id);
   if (found) {
     found.activeBranches = active.slice();
-  } else {
-    const storedBranches = currentCardBranches(path);
-    state.gitCardsByProject[project] = [...cards, { path, workBranches: storedBranches, activeBranches: active.slice() }];
   }
+}
+
+function ensureCardEntry(id: string, path: string): void {
+  const project = currentlySelectedProject();
+  const cards = state.gitCardsByProject[project] ?? [];
+  const existing = cards.find((item) => item.id === id);
+  if (existing) {
+    existing.path = path;
+  } else {
+    state.gitCardsByProject[project] = [...cards, { id, path, workBranches: [], activeBranches: [] }];
+  }
+}
+
+function removeCardEntry(id: string): void {
+  const project = currentlySelectedProject();
+  const cards = state.gitCardsByProject[project] ?? [];
+  state.gitCardsByProject[project] = cards.filter((item) => item.id !== id);
+}
+
+function moveCardEntry(id: string, newPath: string): void {
+  const project = currentlySelectedProject();
+  const cards = state.gitCardsByProject[project] ?? [];
+  const entry = cards.find((item) => item.id === id);
+  if (entry) entry.path = newPath;
 }
 
 function projectNames(repositories: GitRepositorySetting[]): string[] {
@@ -886,7 +915,9 @@ function renderProjectOptions(repositories: GitRepositorySetting[]): void {
   $.dashboardProjectRename.disabled = !$.dashboardProject.value;
 }
 
-function addDashboardGitCard(initialPath?: string): void {
+function addDashboardGitCard(options?: { initialPath?: string; entry?: CardEntry }): void {
+  const initialPath = options?.initialPath ?? options?.entry?.path;
+  const restoreEntry = options?.entry;
   const project = $.dashboardProject.value;
   const repositories = (state.dashboard?.config.repositories ?? []).filter((item) => projectName(item.project) === project);
   if (repositories.length === 0) {
@@ -927,6 +958,7 @@ function addDashboardGitCard(initialPath?: string): void {
   let cardPendingPush = false;
   let cardGitCache: GitStatusView | null = null;
   let cardBranchNames: string[] = [];
+  const cardId = restoreEntry?.id ?? 'git-card-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
   const path = (): string => select.value || '';
   const access: GitCardAccess = {
     repoPath: path,
@@ -934,10 +966,10 @@ function addDashboardGitCard(initialPath?: string): void {
     writeGit: (git) => { cardGitCache = git; },
     branchNames: () => cardBranchNames,
     writeBranchNames: (branches) => { cardBranchNames = branches; },
-    readWork: () => currentCardBranches(path()),
-    writeWork: (list) => saveCardBranches(path(), list),
-    readActive: () => currentCardActiveBranches(path()),
-    writeActive: (list) => saveCardActiveBranches(path(), list),
+    readWork: () => currentCardBranches(cardId),
+    writeWork: (list) => saveCardBranches(cardId, list),
+    readActive: () => currentCardActiveBranches(cardId),
+    writeActive: (list) => saveCardActiveBranches(cardId, list),
     readBusy: () => busy,
     writeBusy: (value) => { busy = value; },
     readClean: () => clean,
@@ -962,14 +994,18 @@ function addDashboardGitCard(initialPath?: string): void {
   removeButton.className = 'ghost danger';
   removeButton.textContent = '카드 삭제';
   removeButton.addEventListener('click', () => {
-    const project = currentlySelectedProject();
-    const cards = state.gitCardsByProject[project] ?? [];
-    state.gitCardsByProject[project] = cards.filter((item) => item.path !== path());
+    removeCardEntry(cardId);
     card.remove();
   });
   card.querySelector('.card-head')!.append(removeButton);
   $.dashboardAddCard.before(card);
+  ensureCardEntry(cardId, path());
   void controller.refresh();
+
+  select.addEventListener('change', () => {
+    const newPath = path();
+    moveCardEntry(cardId, newPath);
+  });
 }
 
 function restoreDashboardGitCards(): void {
@@ -977,10 +1013,10 @@ function restoreDashboardGitCards(): void {
   const saved = state.gitCardsByProject[project];
   if (!saved || saved.length === 0) return;
   let added = 0;
-  for (let index = 0; index < Math.min(saved.length, 3); index += 1) {
+  for (let index = 0; index < saved.length; index += 1) {
     const entry = saved[index];
     if (!entry) continue;
-    addDashboardGitCard(entry.path);
+    addDashboardGitCard({ entry });
     added += 1;
   }
   if (added === 0) setStatus("저장된 Git 카드가 없습니다.");

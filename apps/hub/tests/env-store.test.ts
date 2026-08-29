@@ -25,7 +25,6 @@ const EXPECTED_ENV_KEYS = [
   "DISCORD_BOT_TOKEN",
   "DISCORD_CHANNEL_ID",
   "NOTION_TOKEN",
-  "NOTION_DATABASE_ID",
   "GITHUB_TOKEN",
 ] as const;
 
@@ -202,6 +201,24 @@ describe("env file read/write", () => {
     const content = readFileSync(envFile, "utf8");
     expect(content).toContain("GITHUB_TOKEN=new-token");
     expect(content).toContain("CUSTOM_KEY=stays");
+  });
+
+  it("keeps a quoted JSON value stable across repeated read/write cycles", async () => {
+    const repositories = [
+      { project: "ET", label: "awef", path: "W:/x", notionDatabaseId: "3c67d5bc-cac5-80d3-8e2a-f8848f5f7abd", discordChannelId: "1536922065423044630" },
+    ];
+    await writeEnvFile(envFile, { HUB_GIT_REPOSITORIES: JSON.stringify(repositories) });
+    for (let run = 0; run < 5; run += 1) {
+      await writeEnvFile(envFile, { HUB_DAILY_AUTOMATION_ENABLED: String(run % 2 === 0) });
+    }
+    const reloaded = await readEnvFile(envFile);
+    expect(JSON.parse(reloaded.get("HUB_GIT_REPOSITORIES") ?? "")).toEqual(repositories);
+  });
+
+  it("parseEnvFile decodes escaped quotes so a stored JSON value survives unquote+re-quote", () => {
+    const json = JSON.stringify([{ project: "ET", label: "awef", notionDatabaseId: "3c67d5bc-cac5-80d3-8e2a-f8848f5f7abd" }]);
+    const quoted = '"' + json.replace(/"/g, '\\"') + '"';
+    expect(parseEnvFile("HUB_GIT_REPOSITORIES=" + quoted).get("HUB_GIT_REPOSITORIES")).toBe(json);
   });
 });
 

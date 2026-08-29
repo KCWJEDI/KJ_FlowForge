@@ -34,7 +34,17 @@ export function parseEnvFile(content: string): Map<string, string> {
     if (!match) continue;
     const key = match[1]!;
     let value = match[2]!.trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+    if (value.startsWith('"') && value.endsWith('"')) {
+      // 큰따옴표로 감싼 값은 JSON 문자열 규칙으로 이스케이프(\", \\ 등)를 복원해야
+      // 저장→읽기→재저장 주기를 반복해도 값이 변질되지 않는다. JSON 저장소 값이 계속
+      // 백슬래시를 쌓아 손상되는 문제를 막는다.
+      try {
+        value = JSON.parse(value);
+      } catch {
+        value = value.slice(1, -1);
+      }
+    } else if (value.startsWith("'") && value.endsWith("'")) {
+      // 작은따옴표는 dotenv 규칙상 원시 값(raw)으로 취급한다.
       value = value.slice(1, -1);
     }
     values.set(key, value);
