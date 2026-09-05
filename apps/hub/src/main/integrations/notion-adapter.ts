@@ -212,8 +212,7 @@ export class NotionAdapter {
       input.branches,
     );
 
-    const existingHashes = existing ? await this.readReportedCommitHashes(pageId) : new Set<string>();
-    const children = buildDailyReportBlocks(input.branches, existingHashes);
+    const children = buildDailyReportBlocks(input.branches);
     if (children.length > 0) {
       for (let index = 0; index < children.length; index += MAX_PAGE_CHILDREN) {
         await this.client.blocks.children.append({
@@ -246,14 +245,13 @@ export class NotionAdapter {
       setSchemaProperty(properties, schema, ["브랜치", "Branch"], branches.map(
         (branch) => (branch.repositoryLabel ? `[${branch.repositoryLabel}] ${branch.branch}` : branch.branch)).join(", "));
       setSchemaProperty(properties, schema, ["담당자", "Author"], [...new Set(commits.map((commit) => commit.author))].join(", "));
-      setSchemaProperty(properties, schema, ["시간", "Time"], latestTimestamp(commits));
+      setSchemaProperty(properties, schema, ["시간", "Time"], branches.map((branch) => branch.occurredAt).filter(Boolean).join(", "));
       setSchemaProperty(properties, schema, ["내용", "Content"], branches.map((branch) => branch.content).filter(Boolean).join("\n\n"));
     }
 
     const page = await this.client.pages.create({
       parent: { database_id: databaseId },
-      properties: properties as never,
-      children: [paragraphBlock(`날짜: ${date}`)] as never,
+    properties: properties as never,
     });
     return page.id;
   }
@@ -276,27 +274,6 @@ export class NotionAdapter {
       page_size: 1,
     });
     return response.results[0]?.id ?? null;
-  }
-
-  private async readReportedCommitHashes(pageId: string): Promise<Set<string>> {
-    if (!this.client) return new Set<string>();
-    const hashes = new Set<string>();
-    let cursor: string | undefined;
-    do {
-      const response = await this.client.blocks.children.list({
-        block_id: pageId,
-        start_cursor: cursor,
-        page_size: 100,
-      });
-      for (const block of response.results) {
-        if (!("type" in block) || block.type !== "code" || !("code" in block)) continue;
-        const text = block.code.rich_text.map((item) => item.plain_text).join("");
-        const match = /^커밋:\s*([0-9a-f]{40})/im.exec(text);
-        if (match?.[1]) hashes.add(match[1]);
-      }
-      cursor = response.has_more ? response.next_cursor ?? undefined : undefined;
-    } while (cursor);
-    return hashes;
   }
 
   private async findExistingReport(titlePropertyName: string, title: string): Promise<string | null> {
@@ -341,42 +318,31 @@ function setSchemaProperty(
   }
 }
 
-function buildDailyReportBlocks(branches: DailyWorkReportBranch[], existingHashes: Set<string>): unknown[] {
+function buildDailyReportBlocks(branches: DailyWorkReportBranch[]): unknown[] {
   const blocks: unknown[] = [];
   for (const branch of branches) {
-    const commits = branch.commits.filter((commit) => !existingHashes.has(commit.hash));
-    if (commits.length === 0) continue;
+    const content = (branch.content ?? "").trim();
+    if (!content) continue;
     const heading = branch.branchLabel || branch.repositoryLabel
       ? `[${branch.branchLabel || `분야: ${branch.repositoryLabel}`}] 브랜치: ${branch.branch}`
       : `브랜치: ${branch.branch}`;
     blocks.push(headingBlock(heading));
-    blocks.push(paragraphBlock(`담당자: ${branch.author}`));
-    blocks.push(paragraphBlock(`시간: ${branch.occurredAt}`));
-    const content = commits.map((commit) => {
-      const details = commit.body?.trim() ? `\n${commit.body.trim()}` : "";
-      return `[${commit.hash.slice(0, 8)}] ${commit.subject}${details}`;
-    }).join("\n\n");
-    if (content) {
-      for (const part of chunkText(content)) blocks.push(paragraphBlock(part));
-    }
-    for (const commit of commits) {
-      const lines = [
-        `커밋: ${commit.hash}`,
-        `담당자: ${commit.author}`,
-        `시간: ${commit.occurredAt}`,
-        `제목: ${commit.subject}`,
-      ];
-      if (commit.body?.trim()) lines.push(`내용:\n${commit.body.trim()}`);
-      blocks.push(codeBlock(lines.join("\n")));
+    blocks.push(labelBlock(`담당자: ${branch.author}`));
+    blocks.push(labelBlock(`시간: ${branch.occurredAt}`));
+    for (const rawLine of content.split(`\n`)) {
+      const line = rawLine.trim();
+      if (!line) {
+        blocks.push(paragraphBlock(" "));
+        continue;
+      }
+      if (/^(요약|대표 요약):/.test(line)) {
+        blocks.push(labelBlock(line));
+      } else {
+        blocks.push(paragraphBlock(rawLine));
+      }
     }
   }
   return blocks;
-}
-
-function latestTimestamp(commits: Array<{ occurredAt: string }>): string {
-  return commits.reduce((latest, commit) =>
-    Date.parse(commit.occurredAt) > Date.parse(latest) ? commit.occurredAt : latest,
-  commits[0]?.occurredAt ?? "");
 }
 
 function chunkText(text: string, limit = TEXT_LIMIT): string[] {
@@ -414,11 +380,21 @@ function paragraphBlock(text: string) {
   };
 }
 
+function labelBlock(text: string) {
+  return {
+    object: "block",
+    type: "heading_3",
+    heading_3: {
+      rich_text: [{ type: "text", text: { content: limitText(text) } }],
+    },
+  };
+}
+
 function headingBlock(text: string) {
   return {
     object: "block",
-    type: "heading_2",
-    heading_2: {
+    type: "heading_1",
+    heading_1: {
       rich_text: [{ type: "text", text: { content: limitText(text) } }],
     },
   };

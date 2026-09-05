@@ -10,6 +10,7 @@ export interface PublicConfig {
     discord: boolean;
     notion: boolean;
     github: boolean;
+    gemini: boolean;
   };
 }
 
@@ -23,6 +24,25 @@ export interface GitStatusView {
   files: Array<{ path: string; indexStatus: string; workTreeStatus: string }>;
   conflicts: string[];
   clean: boolean;
+}
+
+export interface GitCardSelection {
+  id: string;
+  path: string;
+  workBranches: string[];
+  activeBranches: string[];
+}
+
+export interface GitSelectionState {
+  workBranchesByProject: Record<string, string[]>;
+  activeBranchesByProject: Record<string, string[]>;
+  cardsByProject: Record<string, GitCardSelection[]>;
+  selectedProject: string;
+  connectedPaths: string[];
+  projectConnectPaths: Record<string, string>;
+  projectConnectMessages: Record<string, string>;
+  projectConnectPath: string;
+  projectConnectMessage: string;
 }
 
 export interface DailyAutomationBranchResult {
@@ -109,6 +129,16 @@ export interface NotionRepositoryView {
   testMessage: string;
 }
 
+export interface RepositoryConnectionCheck {
+  /** 저장소 경로 (저장소별 Notion DB / Discord 채널 용) */
+  repository: string;
+  integration: "notion" | "discord";
+  /** 대상 식별자 (Notion DB ID 또는 Discord 채널 ID) */
+  targetId: string;
+  state: "untested" | "testing" | "connected" | "error";
+  message: string;
+}
+
 export interface GitChangeSummary {
   oldHead: string | null;
   newHead: string;
@@ -132,12 +162,56 @@ export interface GitRepositorySetting {
   discordChannelId?: string;
 }
 
+export interface ProjectDefinition {
+  id: string;
+  name: string;
+  url: string;
+  allowedBranches?: string[];
+  /** 유저(keyId)별 허용 브랜치. 해당 유저는 여기 지정된 브랜치만 사용 가능. */
+  userBranches?: Record<string, string[]>;
+  notionDatabaseId?: string;
+  discordChannelId?: string;
+  gitOwner?: string;
+  gitRepo?: string;
+}
+
+export interface ProjectView {
+  id: string;
+  name: string;
+  url: string;
+  allowedBranches: string[];
+  branchRestricted: boolean;
+  repository: GitRepositorySetting | null;
+  selectableBranches: string[];
+}
+
+export interface GitCloneResult {
+  path: string;
+  url: string;
+  identity: string;
+}
+
+export interface GitConnectResult {
+  path: string;
+  url: string;
+  identity: string;
+}
+
+export interface GitConnectOrCloneResult {
+  action: "clone" | "connect";
+  path: string;
+  url: string;
+  identity: string;
+}
+
 export interface SettingFieldView {
   key: string;
   label: string;
   group: string;
   kind: "text" | "secret" | "number" | "path";
   hint?: string;
+  /** 관리자(admin) 전용 필드인지 여부. 일반 사용자에게는 이 필드가 노출되지 않습니다. */
+  adminOnly?: boolean;
   value: string;
   configured: boolean;
 }
@@ -188,6 +262,10 @@ export interface HubApi {
   gitCommit(args: { repository?: string }): Promise<GitChangeSummary>;
   gitPush(args: { repository?: string }): Promise<GitStatusView>;
   gitPushBranch(args: { repository?: string; branch: string; remote?: string }): Promise<GitStatusView>;
+  getProjects(): Promise<ProjectView[]>;
+  cloneGitRepository(args: { url: string; directory: string }): Promise<GitCloneResult>;
+  connectGitRepository(args: { directory: string }): Promise<GitConnectResult>;
+  connectOrCloneGitRepository(args: { url: string; directory: string }): Promise<GitConnectOrCloneResult>;
   getDailyAutomation(): Promise<DailyAutomationView>;
   runDailyAutomation(): Promise<DailyAutomationRunView>;
   reportManualDailyReport(args: ManualDailyReportInput): Promise<ManualDailyReportResult>;
@@ -195,9 +273,13 @@ export interface HubApi {
   listGitRemoteBranches(url: string): Promise<string[]>;
   getSettings(): Promise<SettingsView>;
   saveSettings(values: Record<string, string>): Promise<SettingsSaveResult>;
+  getGitSelection(): Promise<GitSelectionState>;
+  saveGitSelection(state: GitSelectionState): Promise<GitSelectionState>;
   testIntegrations(): Promise<IntegrationConnectionStatus[]>;
   testNotionDatabase(args: { repository?: string; databaseId: string }): Promise<{ ok: boolean; message: string }>;
   testDiscordChannel(args: { repository?: string; channelId: string }): Promise<{ ok: boolean; message: string }>;
+  /** 앱 시작/설정 변경 시 저장소별 Notion DB·Discord 채널 연결 상태를 배치로 확인합니다. */
+  checkRepositoryConnections(): Promise<RepositoryConnectionCheck[]>;
   getLicenseStatus(): Promise<LicenseStatus>;
   activateLicense(key: string): Promise<LicenseStatus>;
   replaceLicense(key: string): Promise<LicenseStatus>;

@@ -9,9 +9,10 @@ import type {
   ManualDailyReportResult,
 } from "../../shared/ipc";
 import type { HubConfig } from "../config";
-import { GitService, normalizeRemoteIdentity, type GitCommitSummary, type GitRepositoryIdentity } from "../git/git-service";
+import { GitService, normalizeRemoteIdentity, type CommitCategory, type GitCommitSummary, type GitRepositoryIdentity } from "../git/git-service";
 import { NotionAdapter, type DailyWorkReportBranch } from "../integrations/notion-adapter";
 import { DiscordAdapter } from "../integrations/discord-adapter";
+import { GeminiAdapter } from "../integrations/gemini-adapter";
 
 export interface DailyAutomationStateFile {
   version: 1;
@@ -93,6 +94,7 @@ interface DailyAutomationOptions {
   git: GitService;
   notion: NotionAdapter;
   discord?: DiscordAdapter;
+  gemini?: GeminiAdapter;
   /** 관리자 실행 시 저장소의 모든 로컬 브랜치를 분석합니다. */
   allBranches?: boolean;
   onChanged: () => void;
@@ -193,6 +195,15 @@ export class DailyAutomation {
             untilIso: input.untilIso,
           });
           node.commitCount = capture.commits.length;
+          const manualOverview = this.options.gemini?.enabled
+            ? await this.options.gemini.summarizeOverview({
+                repositoryLabel: repositorySetting.label,
+                project: repositorySetting.project,
+                branch,
+                author: "",
+                commits: capture.commits,
+              })
+            : null;
           const workBranch = buildDailyWorkBranch({
             repositoryLabel: repositorySetting.label,
             stateKey: `manual|${repositorySetting.path}|${branch}`,
@@ -203,7 +214,7 @@ export class DailyAutomation {
             previousHead: null,
             currentHead: capture.currentHead,
             commits: capture.commits,
-          });
+          }, manualOverview);
           workBranches.set(repositorySetting.label + "|" + branch, workBranch);
           const pageId = await this.options.notion.createDailyWorkReport({
             date: input.date,
@@ -382,9 +393,10 @@ export class DailyAutomation {
       list.push(capture);
       groups.set(key, list);
     }
+    const overviews = await this.geminiOverviews(captures);
     let reportPageId: string | undefined;
     for (const [databaseKey, groupCaptures] of groups) {
-      const branches = groupCaptures.map(buildDailyWorkBranch);
+      const branches = groupCaptures.map((capture) => buildDailyWorkBranch(capture, overviews.get(capture.stateKey) ?? null));
       const databaseId = databaseKey === "__default__" ? undefined : databaseKey;
       const groupReportKey = databaseId ? `${reportKey}|${databaseId}` : reportKey;
       const pageId = await this.options.notion.createDailyWorkReport({
@@ -397,7 +409,7 @@ export class DailyAutomation {
     }
     if (this.options.discord?.enabled) {
       try {
-        const discordBranches = filterDiscordBranches(captures.map(buildDailyWorkBranch), this.options.config.repositories);
+        const discordBranches = filterDiscordBranches(captures.map((capture) => buildDailyWorkBranch(capture, overviews.get(capture.stateKey) ?? null)), this.options.config.repositories);
         if (discordBranches.length > 0) {
           await this.options.discord.sendMessage(buildDiscordDailySummary(date, discordBranches, reportPageId));
         }
@@ -478,6 +490,25 @@ export class DailyAutomation {
     }, delay);
   }
 
+  private async geminiOverviews(captures: CapturedBranch[]): Promise<Map<string, string | null>> {
+    const result = new Map<string, string | null>();
+    const gemini = this.options.gemini;
+    if (!gemini?.enabled) return result;
+    await Promise.all(captures.map(async (capture) => {
+      if (capture.commits.length === 0) return;
+      const summary = await gemini.summarizeOverview({
+        repositoryLabel: capture.repositoryLabel,
+        project: capture.project,
+        branch: capture.branch,
+        author: [...new Set(capture.commits.filter((c) => Boolean(c.author)).map((c) => c.author as string))].join(", "),
+        commits: capture.commits,
+        fileCount: capture.commits.length,
+      });
+      if (summary) result.set(capture.stateKey, summary);
+    }));
+    return result;
+  }
+
   private async refreshBranches(): Promise<void> {
     const selectedProjects = this.options.config.dailyAutomation.projects;
     const repositories = selectedProjects === undefined
@@ -531,31 +562,67 @@ interface CapturedBranch {
   commits: GitCommitSummary[];
 }
 
-function buildDailyWorkBranch(capture: CapturedBranch): Parameters<NotionAdapter["createDailyWorkReport"]>[0]["branches"][number] {
+function buildDailyWorkBranch(capture: CapturedBranch, overview?: string | null): Parameters<NotionAdapter["createDailyWorkReport"]>[0]["branches"][number] {
   const { repositoryLabel, project, branch, commits } = capture;
   const authors = [...new Set(commits.map((commit) => commit.author).filter(Boolean))];
-  const latest = commits.length > 0
-    ? commits.reduce((current, commit) =>
-      Date.parse(commit.timestamp) > Date.parse(current.timestamp) ? commit : current,
-    commits[0]!)
-    : null;
-  const content = commits.map((commit) => {
-    const details = commit.body.trim() ? `\n${commit.body.trim()}` : "";
-    return `[${commit.hash.slice(0, 8)}] ${commit.subject}${details}`;
-  }).join("\n\n");
+  // 커밋 전체를 통틀어 규칙으로 집계한 요약을 생성합니다.
+  const categoryCounts = new Map<string, number>();
+  const authorsSet = new Set<string>();
+  let insertions = 0;
+  let deletions = 0;
+  const allFiles = new Set<string>();
+  for (const commit of commits) {
+    const cat = commit.category ?? "기타";
+    categoryCounts.set(cat, (categoryCounts.get(cat) ?? 0) + 1);
+    if (commit.author) authorsSet.add(commit.author);
+    insertions += commit.diff?.insertions ?? 0;
+    deletions += commit.diff?.deletions ?? 0;
+    for (const file of [
+      ...(commit.diff?.addedFiles ?? []),
+      ...(commit.diff?.modifiedFiles ?? []),
+      ...(commit.diff?.deletedFiles ?? []),
+    ]) allFiles.add(file);
+  }
+  const lines: string[] = [];
+  if (commits.length === 0) {
+    lines.push("새 커밋 없음");
+  } else {
+    lines.push(`총 커밋 ${commits.length}개`);
+    const categories = [...categoryCounts.entries()]
+      .filter(([, count]) => count > 0)
+      .map(([cat, count]) => `${cat} ${count}`)
+      .join(", ");
+    if (categories) lines.push(`요약: ${categories}`);
+    const statText = (insertions + deletions) > 0 ? ` (+${insertions}/-${deletions})` : "";
+    lines.push(`변경량 ${allFiles.size}개 파일${statText}`);
+if (overview) {
+  // AI 총합 요약 comment: 빈 줄 뒤에 대표 요약 라벨을 인쇄하고 항목을 들여쓰기한다.
+  lines.push("");
+lines.push("대표 요약:");
+for (const item of overview.split("\n").map((s) => s.trim()).filter(Boolean)) {
+    lines.push(" " + item);
+  }
+} else {
+  const overviewLine = buildOverviewSentence(categoryCounts, commits.length);
+  if (overviewLine) lines.push(overviewLine);
+}
+  }
+  const content = lines.join("\n");
   return {
     repositoryLabel,
     branchLabel: project && repositoryLabel ? `${project} : ${repositoryLabel}` : repositoryLabel,
     branch,
-    author: authors.join(", ") || "Unknown",
-    occurredAt: latest?.timestamp ?? "",
+    author: authors.map(cleanAuthor).join(", ") || "Unknown",
+    occurredAt: formatOccurredAt(new Date().toISOString()),
     content,
     commits: commits.map((commit) => ({
       hash: commit.hash,
-      author: commit.author,
-      occurredAt: commit.timestamp,
+      author: cleanAuthor(commit.author),
+      occurredAt: formatOccurredAt(commit.timestamp),
       subject: commit.subject,
       body: commit.body,
+      category: commit.category,
+      diff: commit.diff,
     })),
   };
 }
@@ -564,6 +631,19 @@ function isDailyAutomationRun(value: unknown): value is DailyAutomationRunView {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<DailyAutomationRunView>;
   return typeof candidate.id === "string" && typeof candidate.startedAt === "string" && Array.isArray(candidate.branches);
+}
+
+function formatDiscordContent(content: string): string[] {
+  const result: string[] = [];
+  const lines = content.split(String.fromCharCode(10));
+  for (let index = 0; index < lines.length; index++) {
+    const raw = lines[index] ?? "";
+    result.push(raw.trimEnd());
+    if (index > 0) continue;
+    const line = raw.trimStart();
+    if (line.indexOf("대표 요약:") === 0) result.push("");
+  }
+  return result;
 }
 
 function buildDiscordDailySummary(
@@ -576,28 +656,21 @@ function buildDiscordDailySummary(
   if (branches.length === 0) {
     lines.push("보고할 브랜치가 없습니다.");
   }
-  let totalCommits = 0;
   for (const branch of branches) {
-    totalCommits += branch.commits.length;
     const heading = branch.branchLabel || branch.repositoryLabel
       ? `[${branch.branchLabel ? branch.branchLabel : `분야: ${branch.repositoryLabel}`}] 브랜치 ${branch.branch}`
       : `브랜치 ${branch.branch}`;
-    lines.push("", `**${heading}**`, `담당: ${branch.author || "Unknown"}`);
+    lines.push("", heading, `담당: ${branch.author || "Unknown"}`);
     if (branch.commits.length === 0) {
       lines.push("새 커밋 없음");
       continue;
     }
-    lines.push(`커밋 ${branch.commits.length}개`);
-    for (const commit of branch.commits.slice(0, 10)) {
-      lines.push(`- [${commit.hash.slice(0, 8)}] ${commit.subject}`);
+    const content = (branch.content ?? "").trim();
+    if (content) {
+      lines.push(...formatDiscordContent(content));
+    } else {
+      lines.push(`커밋 ${branch.commits.length}개`);
     }
-    if (branch.commits.length > 10) {
-      lines.push(`…외 ${branch.commits.length - 10}개 커밋`);
-    }
-  }
-  lines.push("", `총 커밋: ${totalCommits}개`);
-  if (reportPageId) {
-    lines.push(`Notion 페이지: ${reportPageId.replace(/-/g, "")}`);
   }
   return lines.join("\n");
 }
@@ -612,30 +685,22 @@ function buildManualDiscordSummary(
   if (branches.length === 0) {
     lines.push("등록할 브랜치가 없습니다.");
   }
-  let totalCommits = 0;
   for (const branch of branches) {
-    totalCommits += branch.commits.length;
     const heading = branch.branchLabel || branch.repositoryLabel
       ? `[${branch.branchLabel ? branch.branchLabel : `분야: ${branch.repositoryLabel}`}] 브랜치 ${branch.branch}`
       : `브랜치 ${branch.branch}`;
-    lines.push("", `**${heading}**`, `담당: ${branch.author || "Unknown"}`);
+    lines.push("", heading, `담당: ${branch.author || "Unknown"}`);
     if (branch.commits.length === 0) {
       lines.push("새 커밋 없음 - 날짜만 등록");
     } else {
-      lines.push(`커밋 ${branch.commits.length}개 요약 등록 완료`);
-      for (const commit of branch.commits.slice(0, 8)) {
-        lines.push(`- [${commit.hash.slice(0, 8)}] ${commit.subject}`);
+      const content = (branch.content ?? "").trim();
+      if (content) {
+        lines.push(...formatDiscordContent(content));
+      } else {
+        lines.push(`커밋 ${branch.commits.length}개 요약 등록 완료`);
       }
-      if (branch.commits.length > 8) {
-        lines.push(`…외 ${branch.commits.length - 8}개 커밋`);
-      }
-    }
-    const node = nodes.find((item) => item.branch === branch.branch && item.repositoryLabel === branch.repositoryLabel);
-    if (node?.notionPageId) {
-      lines.push(`Notion: ${node.notionPageId.replace(/-/g, "")}`);
     }
   }
-  lines.push("", `총 커밋: ${totalCommits}개 · 등록 브랜치 ${branches.length}개`);
   return lines.join("\n");
 }
 
@@ -691,3 +756,44 @@ function isTransient(error: unknown): boolean {
   if (["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN"].includes(candidate.code ?? "")) return true;
   return /timed? out|connection reset|temporarily unavailable|remote end hung up/i.test(candidate.message ?? "");
 }
+const CATEGORY_DESC: Record<CommitCategory, string> = {
+  "기능": "신규 기능 추가",
+  "성능": "성능 최적화",
+  "버그/수정": "버그 수정 및 오류 개선",
+  "리팩토링": "코드·구조 리팩토링",
+  "문서": "문서 정리 및 보강",
+  "기타": "브랜치 병합(Merge) 및 기타 작업",
+};
+
+/** 카테고리 집계를 바탕으로 이번 변경이 중심을 둔 내용을 한 문장으로 요약합니다. */
+function buildOverviewSentence(categoryCounts: Map<string, number>, total: number): string {
+  const ranked = [...categoryCounts.entries()]
+    .filter(([cat, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1]);
+  if (ranked.length === 0) return "대표: 이번 기간 확인된 변경 내용이 없습니다.";
+  const top = ranked[0]!;
+  const second = ranked.length > 1 ? ranked[1]! : null;
+  const topRatio = top[1] / total;
+  const describe = (cat: string): string => (CATEGORY_DESC as Record<string, string>)[cat] ?? cat;
+  if (topRatio >= 0.6) {
+    return `대표: 이번 변경은 주로 ${describe(top[0])}에 중점을 둔 내용입니다.`;
+  }
+  if (second) {
+    return `대표: 이번 변경은 ${describe(top[0])}와(과) ${describe(second[0])} 등이 혼합된 작업입니다.`;
+  }
+  return `대표: 이번 변경은 ${describe(top[0])}을(를) 중심으로 이루어졌습니다.`;
+}
+ /******* helpers added *******/
+function cleanAuthor(name: string): string {
+  const value = name?.trim() || "";
+  if (!value) return value;
+  const cut = Math.min(...[value.indexOf(String.fromCharCode(92)), value.indexOf("/")].filter((n) => n >= 0));
+  return Number.isFinite(cut) ? value.slice(0, cut).trim() : value;
+}
+ function formatOccurredAt(value: string): string {
+   if (!value) return "";
+   const date = new Date(value);
+   if (Number.isNaN(date.getTime())) return value;
+   const pad = (n: number): string => String(n).padStart(2, "0");
+   return `${date.getFullYear()}년 ${pad(date.getMonth() + 1)}월 ${pad(date.getDate())}일 : ${pad(date.getHours())}시 ${pad(date.getMinutes())}분 ${pad(date.getSeconds())}초`;
+ }

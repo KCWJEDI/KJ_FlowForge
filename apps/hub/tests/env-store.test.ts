@@ -21,11 +21,16 @@ const EXPECTED_ENV_KEYS = [
   "HUB_MAX_FRAME_BYTES",
   "HUB_API_TOKEN",
   "HUB_GIT_REPOSITORIES",
+  "HUB_PROJECTS_URL",
+  "HUB_CONFIG_REPO",
   "HUB_DAILY_AUTOMATION_ENABLED",
+  "HUB_DAILY_AUTOMATION_PROJECTS",
   "DISCORD_BOT_TOKEN",
   "DISCORD_CHANNEL_ID",
   "NOTION_TOKEN",
   "GITHUB_TOKEN",
+  "GEMINI_API_KEY",
+  "GEMINI_MODEL",
 ] as const;
 
 describe("env store definitions", () => {
@@ -49,7 +54,7 @@ describe("env store definitions", () => {
     const groups = ENV_DEFINITIONS.filter(
       (definition, index) => index === 0 || definition.group !== ENV_DEFINITIONS[index - 1]?.group,
     ).map((definition) => definition.group);
-    expect(groups).toEqual(["Hub", "Automation", "Discord", "Notion", "GitHub"]);
+expect(groups).toEqual(["Hub", "Automation", "Discord", "Notion", "GitHub", "AI 요약"]);
   });
 });
 

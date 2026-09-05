@@ -14,6 +14,20 @@
   font-size: 14px;
 }
 
+body.theme-light {
+  --bg: #f4f6fa;
+  --panel: #ffffff;
+  --panel-2: #eef2f7;
+  --border: #cbd3df;
+  --text: #1d2735;
+  --muted: #5f6b7a;
+  --accent: #315fc4;
+  --accent-2: #2856b4;
+  --ok: #17865d;
+  --warn: #a76b00;
+  --err: #c43d48;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -61,6 +75,11 @@ body {
 .integration-dots {
   display: flex;
   gap: 8px;
+}
+
+.theme-toggle {
+  margin-left: 12px;
+  white-space: nowrap;
 }
 
 .dot {
@@ -450,6 +469,11 @@ details pre {
   margin: 0;
 }
 
+body.theme-light .code,
+body.theme-light .pending-branch .commits {
+  background: #e7ebf1;
+}
+
 .branch-option .branch-toggle {
   display: flex;
   align-items: center;
@@ -658,6 +682,21 @@ details pre {
 
 .table td.path {
   word-break: break-all;
+}
+
+.files-toggle {
+  padding: 0 8px;
+  margin-right: 6px;
+  font-size: 28px;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.git-files-hidden {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .conflict {

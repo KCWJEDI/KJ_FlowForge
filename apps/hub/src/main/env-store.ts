@@ -9,6 +9,8 @@ export interface EnvDefinition {
   group: string;
   kind: EnvKind;
   hint?: string;
+  /** 관리자(admin 라이선스)만 설정할 수 있는 필드. 일반 사용자에게는 노출/편집이 차단됩니다. */
+  adminOnly?: boolean;
 }
 
 export const ENV_DEFINITIONS: EnvDefinition[] = [
@@ -18,11 +20,16 @@ export const ENV_DEFINITIONS: EnvDefinition[] = [
   { key: "HUB_MAX_FRAME_BYTES", label: "Max frame size (bytes)", group: "Hub", kind: "number", hint: "Max TCP frame size (restart required)" },
   { key: "HUB_API_TOKEN", label: "API token", group: "Hub", kind: "secret", hint: "Bearer token for the local HTTP API" },
   { key: "HUB_GIT_REPOSITORIES", label: "분야별 Git 저장소 목록", group: "Hub", kind: "text", hint: "설정 탭에서 추가한 저장소 JSON입니다. Discord 조건은 discordMinCommits와 discordBranches로 저장됩니다." },
+  { key: "HUB_PROJECTS_URL", label: "프로젝트 정의 URL", group: "Hub", kind: "text", hint: "KJ_FlowForge_Config 저장소의 projects.json raw URL입니다. 일반 사용자는 여기 등록된 프로젝트만 사용할 수 있습니다." },
+  { key: "HUB_CONFIG_REPO", label: "Config 저장소 (owner/repo)", group: "Hub", kind: "text", adminOnly: true, hint: "프로젝트 정의를 push할 KJ_FlowForge_Config 저장소입니다. 관리자만 수정할 수 있습니다." },
   { key: "HUB_DAILY_AUTOMATION_ENABLED", label: "08:00 Git/Notion 자동화", group: "Automation", kind: "text", hint: "true로 설정하면 매일 오전 08:00에 선택 브랜치의 새 커밋을 읽고 Notion 일일작업을 등록합니다." },
+  { key: "HUB_DAILY_AUTOMATION_PROJECTS", label: "08:00 자동화 대상 프로젝트", group: "Automation", kind: "text", hint: "자동화 탭에서 선택한 프로젝트 목록(쉼표 구분)입니다. 자동화 탭에서 관리됩니다." },
   { key: "DISCORD_BOT_TOKEN", label: "Bot token", group: "Discord", kind: "secret", hint: "Discord Developer Portal → Bot → Reset Token" },
   { key: "DISCORD_CHANNEL_ID", label: "Channel ID", group: "Discord", kind: "text", hint: "Copy from a channel with Developer Mode enabled" },
   { key: "NOTION_TOKEN", label: "Integration token", group: "Notion", kind: "secret", hint: "Notion → Settings → Connections → integrations" },
   { key: "GITHUB_TOKEN", label: "Personal access token", group: "GitHub", kind: "secret", hint: "Needs repo scope; add workflow scope for workflow dispatch" },
+  { key: "GEMINI_API_KEY", label: "Gemini API Key", group: "AI 요약", kind: "secret", adminOnly: true, hint: "Google AI Studio API key. 관리자만 설정할 수 있습니다. 일일 작업 보고를 Gemini로 요약합니다." },
+  { key: "GEMINI_MODEL", label: "Gemini 모델", group: "AI 요약", kind: "text", adminOnly: true, hint: "요약에 사용할 Gemini 모델명 (기본: gemini-3.5-flash-lite)" },
 ];
 
 export const ENV_KEYS = ENV_DEFINITIONS.map((definition) => definition.key);

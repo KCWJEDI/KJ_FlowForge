@@ -248,12 +248,15 @@ function testConfig(dataDirectory: string): HubConfig {
     repositories: [{ label: "기본", path: "C:\\fake-repository", url: "", branches: ["main"] }],
     envFile: path.join(dataDirectory, ".env"),
     dataDirectory,
+    projectsUrl: "",
+    configRepo: null,
     secretFile: path.join(dataDirectory, "unity-session.json"),
     sessionSecret: "test",
     dailyAutomation: { enabled: false },
     discord: {},
     notion: { token: "test", databaseId: "test" },
     github: {},
+    gemini: { apiKey: "", model: "gemini-3.5-flash-lite" },
   };
 }
 

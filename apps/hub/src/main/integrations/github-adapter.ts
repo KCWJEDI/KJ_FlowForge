@@ -54,6 +54,56 @@ export class GitHubAdapter {
     });
   }
 
+  /** Config 저장소의 파일 내용을 읽습니다 (없으면 null). */
+  public async readFile(filePath: string, branch = "main"): Promise<string | null> {
+    if (!this.client) throw new Error("GitHub token is not configured");
+    const repository = this.repository();
+    try {
+      const response = await this.client.repos.getContent({
+        ...repository,
+        path: filePath,
+        ref: branch,
+      });
+      const data = response.data as { type?: string; content?: string; sha?: string };
+      if (data.type === "file" && typeof data.content === "string") {
+        return Buffer.from(data.content, "base64").toString("utf8");
+      }
+      return null;
+    } catch (error) {
+      const status = (error as { status?: number })?.status;
+      if (status === 404) return null;
+      throw error;
+    }
+  }
+
+  /** Config 저장소의 파일을 커밋·푸시하거나 새로 생성합니다. */
+  public async writeFile(filePath: string, content: string, branch = "main", message = "chore: update " + filePath): Promise<void> {
+    if (!this.client) throw new Error("GitHub token is not configured");
+    const repository = this.repository();
+    let sha: string | undefined;
+    try {
+      const existing = await this.client.repos.getContent({
+        ...repository,
+        path: filePath,
+        ref: branch,
+      });
+      const data = existing.data as { type?: string; sha?: string };
+      if (data.type === "file" && typeof data.sha === "string") sha = data.sha;
+    } catch (error) {
+      const status = (error as { status?: number })?.status;
+      if (status !== 404) throw error;
+    }
+    const params: Record<string, string> = {
+      ...repository,
+      path: filePath,
+      message,
+      content: Buffer.from(content, "utf8").toString("base64"),
+      branch,
+    };
+    if (sha) params.sha = sha;
+    await this.client.repos.createOrUpdateFileContents(params as Parameters<typeof this.client.repos.createOrUpdateFileContents>[0]);
+  }
+
   private repository(): { owner: string; repo: string } {
     if (!this.client || !this.config.owner || !this.config.repo) {
       throw new Error("GitHub 저장소(owner/repo)가 설정되지 않았습니다.");

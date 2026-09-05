@@ -26,6 +26,7 @@ async function shutdown(): Promise<void> {
     unregisterIpc = null;
   }
   await Promise.allSettled([httpApi?.stop() ?? Promise.resolve(), runtime?.stop() ?? Promise.resolve()]);
+  licenseService?.stopPeriodicVerification();
   httpApi = null;
   runtime = null;
 }
@@ -53,6 +54,7 @@ async function bootstrap(): Promise<void> {
   licenseService = new LicenseService(userData, {
     manifestUrl: process.env.HUB_LICENSE_MANIFEST_URL,
     githubToken: process.env.GITHUB_TOKEN,
+    onRoleChanged: (role) => runtime?.setRole(role),
   });
   registerLicenseIpc(() => licenseService);
   const gate = await licenseService.verifyOnStartup();
@@ -67,7 +69,8 @@ export async function startHub(role?: LicenseRole): Promise<void> {
   const userData = app.getPath("userData");
   const envFile = path.join(userData, ".env");
   const config = await loadConfig(path.join(userData, "runtime"), envFile);
-  runtime = new HubRuntime(config, role ?? "user");
+  runtime = new HubRuntime(config, role ?? "user", licenseService?.peek()?.keyId ?? "");
+  licenseService?.startPeriodicVerification();
   httpApi = new LocalHttpApi(runtime);
   await runtime.start();
   await httpApi.start();

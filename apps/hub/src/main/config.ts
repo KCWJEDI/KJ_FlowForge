@@ -5,6 +5,9 @@ import { z } from "zod";
 import type { GitRepositorySetting, PublicConfig } from "../shared/ipc";
 import { applyEnvToProcess, readEnvFile } from "./env-store";
 
+const DEFAULT_PROJECTS_URL =
+  "https://raw.githubusercontent.com/KCWJEDI/KJ_FlowForge_Config/main/projects.json";
+
 const envSchema = z.object({
   HUB_HTTP_PORT: z.coerce.number().int().min(1024).max(65535).default(43100),
   HUB_TCP_PORT: z.coerce.number().int().min(1024).max(65535).default(43101),
@@ -13,6 +16,8 @@ const envSchema = z.object({
   HUB_API_TOKEN: z.string().optional(),
   HUB_GIT_REPOSITORIES: z.string().optional(),
   HUB_GIT_REPOSITORY: z.string().optional(),
+  HUB_PROJECTS_URL: z.string().optional(),
+  HUB_CONFIG_REPO: z.string().optional(),
   HUB_DAILY_AUTOMATION_ENABLED: z.string().optional(),
   HUB_DAILY_AUTOMATION_PROJECTS: z.string().optional(),
   HUB_GIT_BRANCHES: z.string().optional(),
@@ -21,6 +26,8 @@ const envSchema = z.object({
   NOTION_TOKEN: z.string().optional(),
   NOTION_DATABASE_ID: z.string().optional(),
   GITHUB_TOKEN: z.string().optional(),
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().optional(),
 });
 
 export interface HubConfig {
@@ -31,10 +38,14 @@ export interface HubConfig {
   maxFrameBytes: number;
   apiToken: string;
   repositories: GitRepositorySetting[];
+  projectsUrl: string;
+  /** 프로젝트 정의를 push할 Config 저장소 (owner/repo), HUB_CONFIG_REPO 또는 projectsUrl에서 유도 */
+  configRepo: string | null;
   envFile: string;
   dataDirectory: string;
   secretFile: string;
   sessionSecret: string;
+  selectionFile?: string;
   dailyAutomation: {
     enabled: boolean;
     projects?: string[];
@@ -42,6 +53,7 @@ export interface HubConfig {
   discord: { token?: string; channelId?: string };
   notion: { token?: string; databaseId?: string };
   github: { token?: string; owner?: string; repo?: string };
+  gemini: { apiKey?: string; model: string };
 }
 
 export async function loadConfig(dataDirectory: string, envFile: string): Promise<HubConfig> {
@@ -55,6 +67,11 @@ export async function loadConfig(dataDirectory: string, envFile: string): Promis
     `${JSON.stringify({ host: "127.0.0.1", port: env.HUB_TCP_PORT, sessionSecret }, null, 2)}\n`,
     { encoding: "utf8", mode: 0o600 },
   );
+  const selectionFile = path.join(dataDirectory, "git-selection.json");
+
+  const projectsUrl = (env.HUB_PROJECTS_URL ?? "").trim() || DEFAULT_PROJECTS_URL;
+  const configRepoValue = resolveConfigRepo((env.HUB_CONFIG_REPO ?? "").trim(), projectsUrl);
+  const githubParts = configRepoValue ? configRepoValue.split("/") : [];
 
   return {
     host: "127.0.0.1",
@@ -64,18 +81,37 @@ export async function loadConfig(dataDirectory: string, envFile: string): Promis
     maxFrameBytes: env.HUB_MAX_FRAME_BYTES,
     apiToken: env.HUB_API_TOKEN || randomBytes(24).toString("base64url"),
     repositories: parseRepositories(env.HUB_GIT_REPOSITORIES, env.HUB_GIT_REPOSITORY, env.HUB_GIT_BRANCHES),
+    projectsUrl,
+    configRepo: configRepoValue,
     envFile,
     dataDirectory,
     secretFile,
     sessionSecret,
+    selectionFile,
     dailyAutomation: {
       enabled: /^(1|true|yes|on)$/i.test(env.HUB_DAILY_AUTOMATION_ENABLED ?? ""),
       projects: parseBranchList(env.HUB_DAILY_AUTOMATION_PROJECTS),
     },
     discord: { token: env.DISCORD_BOT_TOKEN, channelId: env.DISCORD_CHANNEL_ID },
     notion: { token: env.NOTION_TOKEN, databaseId: env.NOTION_DATABASE_ID },
-    github: { token: env.GITHUB_TOKEN },
+    github: {
+      token: env.GITHUB_TOKEN,
+      ...(githubParts.length === 2 && githubParts[0] && githubParts[1]
+        ? { owner: githubParts[0], repo: githubParts[1] }
+        : {}),
+    },
+    gemini: {
+      apiKey: env.GEMINI_API_KEY,
+      model: (env.GEMINI_MODEL ?? "gemini-3.5-flash-lite").trim() || "gemini-3.5-flash-lite",
+    },
   };
+}
+
+function resolveConfigRepo(configRepo: string, projectsUrl: string): string | null {
+  if (configRepo) return configRepo.trim();
+  const m = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)/i.exec(projectsUrl);
+  if (m?.[1] && m?.[2]) return m[1] + "/" + m[2];
+  return null;
 }
 
 function parseBranchList(value?: string): string[] {
@@ -139,6 +175,7 @@ export function toPublicConfig(config: HubConfig): PublicConfig {
       discord: Boolean(config.discord.token),
       notion: Boolean(config.notion.token),
       github: Boolean(config.github.token),
+      gemini: Boolean(config.gemini.apiKey),
     },
   };
 }

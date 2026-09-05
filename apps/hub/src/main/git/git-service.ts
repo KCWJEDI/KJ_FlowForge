@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
-import { access, open, readFile, unlink } from "node:fs/promises";
+import { access, mkdir, open, readFile, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { GitStatusView } from "../../shared/ipc";
+import { classifyPurpose, parseNumstat, parseNameStatus } from "./git-diff";
 
 const execFileAsync = promisify(execFile);
 
@@ -12,6 +13,22 @@ export interface GitCommitSummary {
   timestamp: string;
   subject: string;
   body: string;
+  /** 커밋 목적 분류: 기능 | 성능 | 버그/수정 | 리팩토링 | 문서 | 기타 */
+  category?: CommitCategory;
+  /** 커밋별 변경 파일/라인 통계 */
+  diff?: GitCommitDiffStats;
+  /** diff가 계산되었는지 여부 */
+  hasDiff?: boolean;
+}
+
+export type CommitCategory = "기능" | "성능" | "버그/수정" | "리팩토링" | "문서" | "기타";
+
+export interface GitCommitDiffStats {
+  addedFiles: string[];
+  deletedFiles: string[];
+  modifiedFiles: string[];
+  insertions: number;
+  deletions: number;
 }
 
 export interface GitBranchWorktree {
@@ -77,6 +94,48 @@ export class GitService {
     } catch {
       throw new Error(`로컬 Git 저장소를 찾을 수 없습니다: ${repository}`);
     }
+  }
+
+  /** 지정된 빈 폴더에 원격 Git 저장소를 클론하고, 클론된 루트 경로를 반환합니다. */
+  public async cloneRepository(url: string, directory: string): Promise<string> {
+    const remote = url.trim();
+    if (!remote) throw new Error("올바른 Git 저장소 URL을 입력하세요.");
+    const target = path.resolve(directory);
+    if (!target.trim()) throw new Error("복제할 빈 폴더를 선택하세요.");
+    let targetEmpty = false;
+    try {
+      const entries = await readdir(target);
+      targetEmpty = entries.length === 0;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") targetEmpty = true;
+      else if (code !== "NOTEMPTY") throw error;
+    }
+    if (!targetEmpty) throw new Error("대상 폴더가 비어있지 않아 클론할 수 없습니다. 비어있는 새 폴더를 선택하세요.");
+    await mkdir(target, { recursive: true });
+    await this.git(process.cwd(), ["clone", remote, target]);
+    const root = (await this.git(target, ["rev-parse", "--show-toplevel"])).trim();
+    return root || target;
+  }
+
+  /** 대상 폴더의 상태를 자동 판별해 빈 폴더면 clone, 이미 git 저장소면 연결(connect)합니다. */
+  public async connectOrClone(url: string, directory: string): Promise<{ action: "clone" | "connect"; root: string; originUrl: string; identity: string }> {
+    const target = path.resolve(directory);
+    let hasGitDir = false;
+    try {
+      await access(path.join(target, ".git"));
+      hasGitDir = true;
+    } catch {
+      hasGitDir = false;
+    }
+    let root: string;
+    if (hasGitDir) {
+      const identity = await this.getRepositoryIdentity(target);
+      return { action: "connect", root: identity.root, originUrl: identity.originUrl, identity: identity.key };
+    }
+    root = await this.cloneRepository(url, target);
+    const identity = await this.getRepositoryIdentity(root);
+    return { action: "clone", root, originUrl: identity.originUrl, identity: identity.key };
   }
 
   public async inspect(repository: string): Promise<GitStatusView> {
@@ -176,7 +235,7 @@ export class GitService {
   public async listRemoteBranches(url: string): Promise<string[]> {
     const remote = url.trim();
     if (!remote) throw new Error("GitHub 저장소 URL을 입력하세요.");
-    if (!isRemoteRepositoryUrl(remote)) throw new Error("올바른 GitHub 저장소 URL을 입력하세요.");
+
     const output = await this.git(process.cwd(), ["ls-remote", "--heads", remote]);
     return [...new Set(output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => line.split(/\s+/)[1] ?? "").filter((ref) => ref.startsWith("refs/heads/")).map((ref) => ref.slice("refs/heads/".length)))];
   }
@@ -204,6 +263,13 @@ export class GitService {
     const commits = previousHead
       ? await this.listCommitsBetween(root, previousHead, currentHead)
       : [];
+    for (const commit of commits) {
+      if (!commit.hasDiff) {
+        commit.diff = await this.readCommitDiff(root, commit.hash);
+        commit.hasDiff = true;
+      }
+      commit.category = commit.category ?? classifyPurpose(commit.subject);
+    }
     return {
       repository: root,
       branch,
@@ -221,6 +287,13 @@ export class GitService {
     const currentHead = await this.getBranchHead(root, input.branch);
     if (!currentHead) throw new Error("Branch '" + input.branch + "' has no local commit");
     const commits = await this.readCommitsInTimeRange(root, input.branch, input.sinceIso, input.untilIso);
+    for (const commit of commits) {
+      if (!commit.hasDiff) {
+        commit.diff = await this.readCommitDiff(root, commit.hash);
+        commit.hasDiff = true;
+      }
+      commit.category = commit.category ?? classifyPurpose(commit.subject);
+    }
     return {
       repository: root,
       branch: input.branch,
@@ -314,6 +387,21 @@ export class GitService {
   private async commonDirectory(root: string): Promise<string> {
     const value = (await this.git(root, ["rev-parse", "--git-common-dir"])).trim();
     return path.resolve(root, value);
+  }
+
+  /** 특정 커밋의 변경 파일/라인 통계를 부모 기준으로 수집합니다. */
+  private async readCommitDiff(root: string, hash: string): Promise<GitCommitDiffStats> {
+    const numstat = await this.git(root, ["show", "--format=", "--numstat", "-z", hash], true);
+    const nameStatus = await this.git(root, ["show", "--format=", "--name-status", "-z", hash], true);
+    const parsed = parseNumstat(numstat);
+    const statuses = parseNameStatus(nameStatus);
+    return {
+      addedFiles: statuses.added,
+      deletedFiles: statuses.deleted,
+      modifiedFiles: statuses.modified,
+      insertions: parsed.insertions,
+      deletions: parsed.deletions,
+    };
   }
 
   private async assertSafeToCommit(worktree: string): Promise<void> {

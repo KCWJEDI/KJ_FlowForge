@@ -2,8 +2,10 @@ import type {
   DailyAutomationView,
   DashboardState,
   GitRepositorySetting,
+  ProjectView,
   GitStatusView,
   IntegrationConnectionStatus,
+  RepositoryConnectionCheck,
   SettingsSaveResult,
   SettingsView,
   SettingFieldView,
@@ -23,7 +25,9 @@ function required<T>(element: HTMLElement | null, label: string): T {
 const $ = {
   headerMeta: required<HTMLElement>(document.getElementById("header-meta"), "header-meta"),
   integrationDots: required<HTMLElement>(document.getElementById("integration-dots"), "integration-dots"),
+  integrationStatuses: document.createElement("div"),
   refreshState: required<HTMLButtonElement>(document.getElementById("refresh-state"), "refresh-state"),
+  themeToggle: required<HTMLButtonElement>(document.getElementById("theme-toggle"), "theme-toggle"),
   gitRefresh: required<HTMLButtonElement>(document.getElementById("git-refresh"), "git-refresh"),
   gitRepository: required<HTMLSelectElement>(document.getElementById("git-repository"), "git-repository"),
   gitBranches: required<HTMLElement>(document.getElementById("git-branches"), "git-branches"),
@@ -46,20 +50,25 @@ const $ = {
   dashboardProjectRenameInput: required<HTMLInputElement>(document.getElementById("dashboard-project-rename-input"), "dashboard-project-rename-input"),
   dashboardProjectRename: required<HTMLButtonElement>(document.getElementById("dashboard-project-rename"), "dashboard-project-rename"),
   dashboardAddCard: required<HTMLButtonElement>(document.getElementById("dashboard-add-card"), "dashboard-add-card"),
+  projectConnect: required<HTMLElement>(document.getElementById("project-connect"), "project-connect"),
+  projectConnectChoose: required<HTMLButtonElement>(document.getElementById("project-connect-choose"), "project-connect-choose"),
+  projectConnectMessage: required<HTMLElement>(document.getElementById("project-connect-message"), "project-connect-message"),
   settingsTabEnv: required<HTMLButtonElement>(document.getElementById("settings-tab-env"), "settings-tab-env"),
   settingsTabGit: required<HTMLButtonElement>(document.getElementById("settings-tab-git"), "settings-tab-git"),
   settingsTabNotion: required<HTMLButtonElement>(document.getElementById("settings-tab-notion"), "settings-tab-notion"),
-  settingsTabStatus: required<HTMLButtonElement>(document.getElementById("settings-tab-status"), "settings-tab-status"),
   settingsTabLicense: required<HTMLButtonElement>(document.getElementById("settings-tab-license"), "settings-tab-license"),
   settingsPaneEnv: required<HTMLElement>(document.getElementById("settings-pane-env"), "settings-pane-env"),
   settingsPaneGit: required<HTMLElement>(document.getElementById("settings-pane-git"), "settings-pane-git"),
   settingsPaneNotion: required<HTMLElement>(document.getElementById("settings-pane-notion"), "settings-pane-notion"),
-  settingsPaneStatus: required<HTMLElement>(document.getElementById("settings-pane-status"), "settings-pane-status"),
   settingsPaneLicense: required<HTMLElement>(document.getElementById("settings-pane-license"), "settings-pane-license"),
+  settingsTabApikey: required<HTMLButtonElement>(document.getElementById("settings-tab-apikey"), "settings-tab-apikey"),
+  settingsPaneApikey: required<HTMLElement>(document.getElementById("settings-pane-apikey"), "settings-pane-apikey"),
+  settingsApikeyGroup: required<HTMLElement>(document.getElementById("settings-apikey-group"), "settings-apikey-group"),
+  settingsApikeySave: required<HTMLButtonElement>(document.getElementById("settings-apikey-save"), "settings-apikey-save"),
+  settingsApikeyMessage: required<HTMLElement>(document.getElementById("settings-apikey-message"), "settings-apikey-message"),
   settingsLicenseKey: required<HTMLInputElement>(document.getElementById("settings-license-key"), "settings-license-key"),
   settingsLicenseChange: required<HTMLButtonElement>(document.getElementById("settings-license-change"), "settings-license-change"),
   settingsLicenseMessage: required<HTMLElement>(document.getElementById("settings-license-message"), "settings-license-message"),
-  settingsEnvFile: required<HTMLElement>(document.getElementById("settings-env-file"), "settings-env-file"),
   settingsApiMissing: required<HTMLElement>(document.getElementById("settings-api-missing"), "settings-api-missing"),
   settingsForm: required<HTMLFormElement>(document.getElementById("settings-form"), "settings-form"),
   settingsGroups: required<HTMLElement>(document.getElementById("settings-groups"), "settings-groups"),
@@ -80,8 +89,6 @@ const $ = {
   settingsDiscordRepositories: required<HTMLElement>(document.getElementById("settings-discord-repositories"), "settings-discord-repositories"),
   settingsDiscordSave: required<HTMLButtonElement>(document.getElementById("settings-discord-save"), "settings-discord-save"),
   settingsDiscordMessage: required<HTMLElement>(document.getElementById("settings-discord-message"), "settings-discord-message"),
-  integrationStatuses: required<HTMLElement>(document.getElementById("integration-statuses"), "integration-statuses"),
-  settingsTestStatus: required<HTMLButtonElement>(document.getElementById("settings-test-status"), "settings-test-status"),
   automationState: required<HTMLElement>(document.getElementById("automation-state"), "automation-state"),
   automationEnabled: required<HTMLInputElement>(document.getElementById("automation-enabled"), "automation-enabled"),
   automationProjects: required<HTMLElement>(document.getElementById("automation-projects"), "automation-projects"),
@@ -118,6 +125,13 @@ const state: {
   gitActiveBranches: string[];
   gitActiveBranchesByProject: Record<string, string[]>;
   gitCardsByProject: Record<string, Array<{ id: string; path: string; workBranches: string[]; activeBranches: string[] }>>;
+  lastSelectedProject: string;
+  projects: ProjectView[];
+  connectedPaths: string[];
+  projectConnectPaths: Record<string, string>;
+  projectConnectMessages: Record<string, string>;
+  projectConnectPath: string;
+  projectConnectMessage: string;
   settings: SettingsView | null;
   settingsStatuses: IntegrationConnectionStatus[];
   settingsBusy: boolean;
@@ -142,6 +156,13 @@ const state: {
   gitActiveBranches: [],
   gitActiveBranchesByProject: {},
   gitCardsByProject: {},
+  lastSelectedProject: "",
+  projects: [],
+  connectedPaths: [],
+  projectConnectPaths: {},
+  projectConnectMessages: {},
+  projectConnectPath: "",
+  projectConnectMessage: "",
   settings: null,
   settingsStatuses: [],
   settingsBusy: false,
@@ -159,6 +180,17 @@ const state: {
 
 function setStatus(message: string): void {
   $.statusBar.textContent = message;
+}
+
+function applyTheme(theme: "dark" | "light"): void {
+  document.body.classList.toggle("theme-light", theme === "light");
+  $.themeToggle.textContent = theme === "dark" ? "라이트 모드" : "다크 모드";
+  $.themeToggle.setAttribute("aria-label", theme === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환");
+  localStorage.setItem("kj-flowforge-theme", theme);
+}
+
+function initializeTheme(): void {
+  applyTheme(localStorage.getItem("kj-flowforge-theme") === "light" ? "light" : "dark");
 }
 
 
@@ -231,7 +263,7 @@ function discordDotMeta(): { className: string; title: string } {
 }
 
 function renderHeader(dashboard: DashboardState): void {
-  $.headerMeta.textContent = `Started ${formatTime(dashboard.startedAt)} · HTTP ${dashboard.config.httpPort}`;
+  $.headerMeta.textContent = "";
   const integrations = [
     { key: "discord" as const, label: "Discord", on: dashboard.config.integrations.discord },
     { key: "notion" as const, label: "Notion", on: dashboard.config.integrations.notion },
@@ -252,33 +284,58 @@ function renderGitRepositoryOptions(): void {
   const previous = $.gitRepository.value;
   $.gitRepository.innerHTML = "";
   const project = $.dashboardProject.value;
+  // 프로젝트가 선택되지 않은 동안에는 이전 프로젝트의 Git 작업 대상을
+  // 다시 표시하지 않습니다. 선택값이 없으면 Git 카드도 빈 상태로 유지합니다.
+  if (!project) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "프로젝트를 선택하세요.";
+    $.gitRepository.appendChild(option);
+    state.git = null;
+    state.gitBranches = [];
+    state.gitWorkBranches = [];
+    state.gitActiveBranches = [];
+    mainGitPendingPush = false;
+    if (mainGitController) void mainGitController.refresh();
+    return;
+  }
   const repos = (state.dashboard?.config.repositories ?? []).filter((repo) => !project || projectName(repo.project) === project);
   if (repos.length === 0) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = "설정된 저장소 없음";
+    option.textContent = "현재 프로젝트에 설정된 저장소 없음";
     $.gitRepository.appendChild(option);
-  } else {
-    for (const [index, repo] of repos.entries()) {
-      const repoPath = repo.path ?? "";
-      const option = document.createElement("option");
-      option.value = String(index);
-      option.dataset.path = repoPath;
-      option.textContent = `${projectName(repo.project)} · ${repo.label || "저장소"} · ${repo.username || "KCWJEDI"} · ${repoPath}`;
-      $.gitRepository.appendChild(option);
-    }
+    state.git = null;
+    state.gitBranches = [];
+    state.gitWorkBranches = [];
+    state.gitActiveBranches = [];
+    mainGitPendingPush = false;
+    if (mainGitController) void mainGitController.refresh();
+    return;
+  }
+  for (const [index, repo] of repos.entries()) {
+    const option = document.createElement("option");
+    option.value = String(index);
+    // 연결된 로컬 폴더는 프로젝트별로 지정한 경로를 사용합니다. (지정된 경로 없으면 저장소 기본 경로)
+    const projectConnPath = state.projectConnectPaths[project] ?? "";
+    const workPath = projectConnPath || (repo.path ?? "");
+    option.dataset.path = workPath;
+    // 드롭박스에는 프로젝트명만 표시하고 로컬 폴더 경로는 노출하지 않습니다.
+    option.textContent = projectName(repo.project);
+    $.gitRepository.appendChild(option);
   }
   let selected = "";
   if (previous && Array.from($.gitRepository.options).some((o) => o.value === previous)) {
     selected = previous;
-  } else if (repos.length > 0) {
-    selected = "0";
+  } else if ($.gitRepository.options.length > 0 && $.gitRepository.options[0]!.value !== "") {
+    selected = $.gitRepository.options[0]!.value;
   }
   $.gitRepository.value = selected;
   if (selected && selected !== previous && !state.gitBusy) {
     if (mainGitController) void mainGitController.refresh();
   }
 }
+
 function selectedRepository(): string | undefined {
   const value = $.gitRepository.selectedOptions[0]?.dataset.path?.trim() ?? "";
   return value || undefined;
@@ -288,14 +345,46 @@ function repositorySettingForPath(path: string): GitRepositorySetting | undefine
   return (state.dashboard?.config.repositories ?? []).find((item) => item.path === path);
 }
 
+function persistGitSelectionState(): void {
+  const payload = {
+    workBranchesByProject: state.gitWorkBranchesByProject,
+    activeBranchesByProject: state.gitActiveBranchesByProject,
+    cardsByProject: state.gitCardsByProject,
+    selectedProject: $.dashboardProject.value || "",
+    connectedPaths: state.connectedPaths,
+    projectConnectPaths: state.projectConnectPaths,
+    projectConnectMessages: state.projectConnectMessages,
+    projectConnectPath: state.projectConnectPath,
+    projectConnectMessage: state.projectConnectMessage,
+  };
+  // 메인 프로세스가 userData 디렉터리에 JSON 파일로 영구 저장하므로 앱을 재실행해도 유지됩니다.
+  void window.hub.saveGitSelection(payload).catch(() => { /* 저장 실패는 조용히 무시 */ });
+}
+
+async function loadGitSelectionState(): Promise<void> {
+  const parsed = await window.hub.getGitSelection().catch(() => null);
+  if (!parsed) return;
+  state.gitWorkBranchesByProject = parsed.workBranchesByProject ?? {};
+  state.gitActiveBranchesByProject = parsed.activeBranchesByProject ?? {};
+  state.gitCardsByProject = parsed.cardsByProject ?? {};
+  state.lastSelectedProject = parsed.selectedProject ?? "";
+  if (Array.isArray(parsed.connectedPaths)) state.connectedPaths = parsed.connectedPaths;
+  state.projectConnectPaths = parsed.projectConnectPaths ?? {};
+  state.projectConnectMessages = parsed.projectConnectMessages ?? {};
+  state.projectConnectPath = parsed.projectConnectPath ?? "";
+  state.projectConnectMessage = parsed.projectConnectMessage ?? "";
+}
+
 function persistGitWorkBranches(): void {
   const project = $.dashboardProject.value || "";
   state.gitWorkBranchesByProject[project] = state.gitWorkBranches.slice();
+  persistGitSelectionState();
 }
 
 function persistGitActiveBranches(): void {
   const project = $.dashboardProject.value || "";
   state.gitActiveBranchesByProject[project] = state.gitActiveBranches.slice();
+  persistGitSelectionState();
 }
 
 function currentlySelectedProject(): string {
@@ -349,6 +438,8 @@ interface GitCardDom {
   summary: HTMLElement;
   conflicts: HTMLElement;
   table: HTMLTableElement;
+  filesToggle?: HTMLButtonElement;
+  filesHidden?: HTMLElement;
   commitBtn: HTMLButtonElement;
   pushBtn: HTMLButtonElement;
   reportBtn?: HTMLButtonElement;
@@ -408,10 +499,16 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
   const summary = dom.summary;
   const conflicts = dom.conflicts;
   const table = dom.table;
+  const filesToggle = dom.filesToggle;
+  const filesHidden = dom.filesHidden;
   const commitBtn = dom.commitBtn;
   const pushBtn = dom.pushBtn;
   const reportBtn = dom.reportBtn;
   const errorEl = dom.errorEl;
+
+  // 일일 요약 등록 버튼은 관리자(admin) 라이선스에서만 노출합니다. 일반(user) 라이선스에서는 숨깁니다.
+  const isAdminRole = state.dashboard?.role === "admin";
+  if (reportBtn) reportBtn.hidden = !isAdminRole;
 
   const applyButtonState = (): void => {
     if (access.readBusy()) {
@@ -439,6 +536,48 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
     if (!value) applyButtonState();
   };
 
+
+  // 변경된 파일 목록 접기/펼치기 상태 (기본: 펼침).
+  let filesCollapsed = false;
+  const COLLAPSE_LIMIT = 10;
+
+  const renderFiles = (files: { path: string; indexStatus: string; workTreeStatus: string }[]): void => {
+    const body = table.tBodies[0];
+    if (!body) return;
+    body.innerHTML = '';
+    const hasMany = files.length > COLLAPSE_LIMIT;
+    if (filesToggle) filesToggle.hidden = !hasMany;
+    const visible = hasMany && filesCollapsed ? files.slice(0, COLLAPSE_LIMIT) : files;
+    for (const file of visible) {
+      const row = document.createElement('tr');
+      const path = document.createElement('td');
+      path.textContent = file.path;
+      const index = document.createElement('td');
+      index.textContent = file.indexStatus;
+      const workTree = document.createElement('td');
+      workTree.textContent = file.workTreeStatus;
+      row.append(path, index, workTree);
+      body.appendChild(row);
+    }
+    if (filesToggle) filesToggle.textContent = hasMany && filesCollapsed ? '▸' : '▾';
+    if (filesHidden) {
+      if (hasMany && filesCollapsed) {
+        filesHidden.hidden = false;
+        filesHidden.textContent = files.length - COLLAPSE_LIMIT + '개 파일이 접혀 있습니다';
+      } else {
+        filesHidden.hidden = true;
+      }
+    }
+  };
+
+  if (filesToggle) {
+    filesToggle.addEventListener('click', () => {
+      filesCollapsed = !filesCollapsed;
+      const git = access.readGit();
+      renderFiles(git ? git.files : []);
+    });
+  }
+
   const renderGitView = (git: GitStatusView | null): void => {
     if (git) {
       const parts = [
@@ -455,22 +594,8 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
     const hasConflicts = Boolean(git && git.conflicts.length > 0);
     conflicts.hidden = !hasConflicts;
     conflicts.textContent = hasConflicts && git ? '병합 충돌: ' + git.conflicts.join(', ') : '';
-    const body = table.tBodies[0];
-    if (body) body.innerHTML = '';
     const files = git ? git.files : [];
-    if (body) {
-      for (const file of files) {
-        const row = document.createElement('tr');
-        const path = document.createElement('td');
-        path.textContent = file.path;
-        const index = document.createElement('td');
-        index.textContent = file.indexStatus;
-        const workTree = document.createElement('td');
-        workTree.textContent = file.workTreeStatus;
-        row.append(path, index, workTree);
-        body.appendChild(row);
-      }
-    }
+    renderFiles(files);
     access.writeClean(git ? git.clean : true);
   };
 
@@ -508,6 +633,14 @@ function mountGitCard(dom: GitCardDom, access: GitCardAccess): GitCardController
         access.writeWork(list.slice());
         applyButtonState();
         void syncActiveBranch();
+      },
+      onOpenRefresh: async () => {
+        try {
+          await window.hub.getProjects();
+          return await window.hub.listGitBranches(access.repoPath());
+        } catch {
+          return access.branchNames();
+        }
       },
       onActiveChange: (active) => {
         access.writeActive(active.slice());
@@ -674,6 +807,8 @@ function mountDashboardMainGitCard(): GitCardController {
     summary: $.gitSummary,
     conflicts: $.gitConflicts,
     table: $.gitFiles,
+    filesToggle: required<HTMLButtonElement>(document.getElementById("git-files-toggle"), "git-files-toggle"),
+    filesHidden: required<HTMLElement>(document.getElementById("git-files-hidden"), "git-files-hidden"),
     commitBtn: $.gitCommit,
     pushBtn: $.gitPush,
     reportBtn: $.gitDailyReport,
@@ -734,10 +869,12 @@ async function saveDailyAutomation(): Promise<void> {
   const projects = state.dashboard?.dailyAutomation.selectedProjects ?? [];
   if (projects.length === 0) {
     $.automationMessageText.textContent = "최소 하나 이상의 프로젝트를 선택하세요.";
+    $.automationMessageText.className = "error-text";
     return;
   }
   state.automationBusy = true;
   $.automationMessageText.textContent = "저장 중…";
+  $.automationMessageText.className = "success-text";
   if (state.dashboard) renderDailyAutomation(state.dashboard.dailyAutomation);
   try {
     const result = await api.saveSettings({
@@ -747,9 +884,11 @@ async function saveDailyAutomation(): Promise<void> {
     state.settings = result.settings;
     state.settingsStatuses = result.statuses;
     $.automationMessageText.textContent = "설정이 저장되었습니다.";
+    $.automationMessageText.className = "success-text";
     await refreshState();
   } catch (error) {
     $.automationMessageText.textContent = `저장 실패: ${error instanceof Error ? error.message : String(error)}`;
+    $.automationMessageText.className = "error-text";
   } finally {
     state.automationBusy = false;
     if (state.dashboard) renderDailyAutomation(state.dashboard.dailyAutomation);
@@ -760,15 +899,18 @@ async function runDailyAutomationNow(): Promise<void> {
   if (state.automationBusy) return;
   state.automationBusy = true;
   $.automationMessageText.textContent = "자동화를 실행 중입니다…";
+  $.automationMessageText.className = "success-text";
   if (state.dashboard) renderDailyAutomation(state.dashboard.dailyAutomation);
   try {
     const run = await window.hub.runDailyAutomation();
     $.automationMessageText.textContent = run.status === "succeeded"
       ? "자동화 실행이 완료되었습니다."
       : `자동화 실행 결과: ${run.status}`;
+    $.automationMessageText.className = run.status === "succeeded" ? "success-text" : "error-text";
     await refreshState();
   } catch (error) {
     $.automationMessageText.textContent = `실행 실패: ${error instanceof Error ? error.message : String(error)}`;
+    $.automationMessageText.className = "error-text";
   } finally {
     state.automationBusy = false;
     if (state.dashboard) renderDailyAutomation(state.dashboard.dailyAutomation);
@@ -777,7 +919,13 @@ async function runDailyAutomationNow(): Promise<void> {
 
 async function refreshState(): Promise<void> {
   try {
-    const dashboard = await window.hub.getState();
+    const [dashboard, projects] = await Promise.all([
+      window.hub.getState(),
+      window.hub.getProjects().catch(() => [] as ProjectView[]),
+    ]);
+    // 빈 응답도 반영해야 Config에서 프로젝트가 삭제되거나,
+    // 일반 사용자에게 라이선스별 브랜치 배정이 없을 때 이전 목록이 남지 않습니다.
+    state.projects = projects;
     renderDashboard(dashboard);
   } catch (error) {
     setStatus(`상태 로드 실패: ${error instanceof Error ? error.message : String(error)}`);
@@ -791,8 +939,33 @@ function renderDashboard(dashboard: DashboardState): void {
   renderHeader(dashboard);
   $.mainTabAutomation.hidden = dashboard.role !== "admin";
   if (dashboard.role !== "admin" && !$.panelAutomation.hidden) switchMainPanel("dashboard");
+  const isAdmin = dashboard.role === "admin";
+  $.settingsTabApikey.hidden = !isAdmin;
+  // 일반 사용자(.env 수정, Git/Notion/Discord 저장소 설정, API 키) 탭을 숨깁니다.
+  $.settingsTabEnv.hidden = !isAdmin;
+  $.settingsTabGit.hidden = !isAdmin;
+  $.settingsTabNotion.hidden = !isAdmin;
+  $.settingsTabDiscord.hidden = !isAdmin;
+  if (!isAdmin && (!$.settingsPaneApikey.hidden || !$.settingsPaneEnv.hidden || !$.settingsPaneGit.hidden || !$.settingsPaneNotion.hidden || !$.settingsPaneDiscord.hidden)) {
+    switchSettingsPanel("license");
+  }
+  // 일일 요약 등록 버튼은 관리자(admin) 라이선스에서만 노출합니다.
+  $.gitDailyReport.hidden = !isAdmin;
   renderProjectOptions(dashboard.config.repositories);
   renderGitRepositoryOptions();
+  // 재시작 후에도 연결 완료 메시지를 표시합니다. (프로젝트별)
+  const currentConnProject = $.dashboardProject.value || "";
+  if (currentConnProject) {
+    state.projectConnectPath = state.projectConnectPaths[currentConnProject] ?? "";
+    state.projectConnectMessage = state.projectConnectMessages[currentConnProject] ?? "";
+  }
+  if (state.projectConnectMessage) {
+    $.projectConnectMessage.textContent = state.projectConnectMessage;
+    $.projectConnectMessage.className = "muted";
+  } else {
+    $.projectConnectMessage.textContent = "경로가 지정되지 않았습니다.";
+    $.projectConnectMessage.className = "error-text";
+  }
   renderDailyAutomation(dashboard.dailyAutomation);
 }
 
@@ -833,6 +1006,13 @@ function projectName(value?: string): string {
   return value?.trim() || "미지정 프로젝트";
 }
 
+/** 프로젝트 정의(Git URL)와 등록된 Git 저장소(URL)가 동일한지 비교합니다. */
+function sameRepoUrl(projectUrl: string, repoUrl: string): boolean {
+  const strip = (value: string): string =>
+    value.trim().replace(/^(https?|ssh|git):\/\//i, "").replace(/^git@/i, "").replace(/\.git$/i, "").replace(/\/$/, "").toLowerCase();
+  return Boolean(projectUrl && repoUrl) && strip(projectUrl) === strip(repoUrl);
+}
+
 interface CardEntry {
   id: string;
   path: string;
@@ -853,6 +1033,7 @@ function saveCardBranches(id: string, branches: string[]): void {
   const found = cards.find((item) => item.id === id);
   if (found) {
     found.workBranches = branches.slice();
+    persistGitSelectionState();
   }
 }
 
@@ -869,6 +1050,7 @@ function saveCardActiveBranches(id: string, active: string[]): void {
   const found = cards.find((item) => item.id === id);
   if (found) {
     found.activeBranches = active.slice();
+    persistGitSelectionState();
   }
 }
 
@@ -881,12 +1063,14 @@ function ensureCardEntry(id: string, path: string): void {
   } else {
     state.gitCardsByProject[project] = [...cards, { id, path, workBranches: [], activeBranches: [] }];
   }
+  persistGitSelectionState();
 }
 
 function removeCardEntry(id: string): void {
   const project = currentlySelectedProject();
   const cards = state.gitCardsByProject[project] ?? [];
   state.gitCardsByProject[project] = cards.filter((item) => item.id !== id);
+  persistGitSelectionState();
 }
 
 function moveCardEntry(id: string, newPath: string): void {
@@ -894,6 +1078,7 @@ function moveCardEntry(id: string, newPath: string): void {
   const cards = state.gitCardsByProject[project] ?? [];
   const entry = cards.find((item) => item.id === id);
   if (entry) entry.path = newPath;
+  persistGitSelectionState();
 }
 
 function projectNames(repositories: GitRepositorySetting[]): string[] {
@@ -903,7 +1088,13 @@ function projectNames(repositories: GitRepositorySetting[]): string[] {
 function renderProjectOptions(repositories: GitRepositorySetting[]): void {
   const previous = $.dashboardProject.value;
   $.dashboardProject.innerHTML = "";
-  for (const project of projectNames(repositories)) {
+  const isAdminRole = state.dashboard?.role === "admin";
+  // 일반 사용자는 Config에서 라이선스에 배정된 프로젝트만 선택할 수 있습니다.
+  // 로컬 폴더 연결 전에도 프로젝트를 보여줘야 하므로 로컬 저장소와 조인하지 않습니다.
+  const projectNamesList = isAdminRole
+    ? projectNames(repositories)
+    : state.projects.map((project) => project.name);
+  for (const project of projectNamesList) {
     const option = document.createElement("option");
     option.value = project;
     option.textContent = project;
@@ -911,9 +1102,62 @@ function renderProjectOptions(repositories: GitRepositorySetting[]): void {
   }
   if (previous && Array.from($.dashboardProject.options).some((option) => option.value === previous)) {
     $.dashboardProject.value = previous;
+  } else if (state.lastSelectedProject && Array.from($.dashboardProject.options).some((option) => option.value === state.lastSelectedProject)) {
+    $.dashboardProject.value = state.lastSelectedProject;
   }
-  $.dashboardProjectRename.disabled = !$.dashboardProject.value;
+  const isAdmin = state.dashboard?.role === 'admin';
+  $.dashboardProjectRenameInput.hidden = !isAdmin;
+  $.dashboardProjectRename.hidden = !isAdmin;
+  $.dashboardProjectRename.disabled = !isAdmin || !$.dashboardProject.value;
 }
+
+function currentProjectView(): ProjectView | undefined {
+  const project = $.dashboardProject.value || "";
+  if (!project) return undefined;
+  return state.projects.find((item) => item.name === project || item.id === project);
+}
+
+function setProjectConnectMessage(message: string, isError = false): void {
+  $.projectConnectMessage.textContent = message;
+  $.projectConnectMessage.className = isError ? "error-text" : "muted";
+  // 성공 메시지는 프로젝트별로 재시작 후에도 유지되도록 저장합니다. (에러는 유지하지 않음)
+  if (!isError) {
+    const project = $.dashboardProject.value || "";
+    state.projectConnectMessage = message;
+    if (project) state.projectConnectMessages[project] = message;
+    persistGitSelectionState();
+  }
+}
+
+async function chooseProjectConnectFolder(): Promise<void> {
+  const restore = (t: string, isErr = false) => setProjectConnectMessage(t, isErr);
+  try {
+    const directory = await window.hub.chooseGitRepository();
+    if (!directory) return;
+    state.projectConnectPath = directory;
+    const project = currentProjectView();
+    if (!project) { restore('먼저 연결할 프로젝트를 선택하세요.', true); return; }
+    state.projectConnectPaths[project.name ?? project.id] = directory;
+    restore('저장소를 연결하는 중...');
+    try {
+      const result = await window.hub.connectOrCloneGitRepository({ url: project.url, directory });
+      restore((result.action === 'clone' ? '클론 완료: ' : '연결 완료: ') + result.path);
+      addConnectedPath(result.path);
+      void refreshState();
+    } catch (err) {
+      restore('클론 실패: ' + (err instanceof Error ? err.message : String(err)), true);
+    }
+  } catch (error) {
+    restore('폴더 선택 실패: ' + (error instanceof Error ? error.message : String(error)), true);
+  }
+}
+function addConnectedPath(p: string): void {
+  const t = p.trim();
+  if (!t || state.connectedPaths.includes(t)) return;
+  state.connectedPaths.push(t);
+  persistGitSelectionState();
+}
+
 
 function addDashboardGitCard(options?: { initialPath?: string; entry?: CardEntry }): void {
   const initialPath = options?.initialPath ?? options?.entry?.path;
@@ -942,6 +1186,9 @@ function addDashboardGitCard(options?: { initialPath?: string; entry?: CardEntry
   const push = buttons[1]!;
   const report = buttons[2] as HTMLButtonElement | undefined;
   push.classList.add('push-button');
+  // 일일 요약 등록 버튼은 관리자(admin) 라이선스에서만 노출합니다.
+  const extraIsAdminRole = state.dashboard?.role === "admin";
+  if (report) report.hidden = !extraIsAdminRole;
   const error = card.querySelector<HTMLElement>('.error-text')!;
   select.innerHTML = '';
   let preselected = '';
@@ -1031,8 +1278,9 @@ function buildWorkBranchPicker(options: {
   onActiveChange?: (active: string[]) => void;
   onSwitch: (branch: string) => Promise<void>;
   onChange?: (branches: string[]) => void;
+  onOpenRefresh?: () => Promise<string[]>;
 }): void {
-  const { container, names, current, onSwitch, onChange, onActiveChange } = options;
+  const { container, names, current, onSwitch, onChange, onActiveChange, onOpenRefresh } = options;
   container.innerHTML = "";
   // 저장된 값(빈 배열 포함)이 전달되면 그대로 사용하고, 없을 때만 현재 브랜치로 채운다.
   const seed = Array.isArray(options.selected) ? options.selected : [current];
@@ -1069,6 +1317,25 @@ function buildWorkBranchPicker(options: {
   topRow.className = "branch-top-row";
   topRow.appendChild(select);
   container.appendChild(topRow);
+  let openRefreshInFlight = false;
+  const refreshFromSource = async (): Promise<void> => {
+    if (!onOpenRefresh || openRefreshInFlight) return;
+    openRefreshInFlight = true;
+    try {
+      const fresh = await onOpenRefresh();
+      if (Array.isArray(fresh)) {
+        names.length = 0;
+        for (const branch of fresh) { if (!names.includes(branch)) names.push(branch); }
+        refreshSelectOptions();
+        renderChips();
+        updateAllInput();
+      }
+    } finally {
+      openRefreshInFlight = false;
+    }
+  };
+  select.addEventListener("mousedown", () => void refreshFromSource());
+  select.addEventListener("focus", () => void refreshFromSource());
   function refreshSelectOptions(): void {
     const current = select.value;
     select.innerHTML = "";
@@ -1208,14 +1475,14 @@ function settingsHub(): HubSettingsApi | null {
   return null;
 }
 
-function setSettingsMessage(message: string): void {
+function setSettingsMessage(message: string, color: "success" | "error" | "neutral" = "neutral"): void {
   $.settingsMessage.textContent = message;
+  $.settingsMessage.className = color === "success" ? "success-text" : color === "error" ? "error-text" : "muted";
 }
 
 function setSettingsBusy(busy: boolean): void {
   $.settingsSave.disabled = busy;
   $.settingsTest.disabled = busy;
-  $.settingsTestStatus.disabled = busy;
 }
 
 function switchMainPanel(panel: "dashboard" | "automation" | "settings"): void {
@@ -1233,22 +1500,19 @@ function switchMainPanel(panel: "dashboard" | "automation" | "settings"): void {
   }
 }
 
-function switchSettingsPanel(panel: "env" | "git" | "notion" | "discord" | "status" | "license"): void {
+function switchSettingsPanel(panel: "env" | "git" | "notion" | "discord" | "license" | "apikey"): void {
   $.settingsPaneEnv.hidden = panel !== "env";
   $.settingsPaneGit.hidden = panel !== "git";
   $.settingsPaneNotion.hidden = panel !== "notion";
   $.settingsPaneDiscord.hidden = panel !== "discord";
-  $.settingsPaneStatus.hidden = panel !== "status";
   $.settingsPaneLicense.hidden = panel !== "license";
+  $.settingsPaneApikey.hidden = panel !== "apikey";
   $.settingsTabEnv.classList.toggle("active", panel === "env");
   $.settingsTabGit.classList.toggle("active", panel === "git");
   $.settingsTabNotion.classList.toggle("active", panel === "notion");
   $.settingsTabDiscord.classList.toggle("active", panel === "discord");
-  $.settingsTabStatus.classList.toggle("active", panel === "status");
   $.settingsTabLicense.classList.toggle("active", panel === "license");
-  if (panel === "status" && state.settingsStatuses.length === 0) {
-    void performTestIntegrations();
-  }
+  $.settingsTabApikey.classList.toggle("active", panel === "apikey");
 }
 
 async function refreshSettings(): Promise<void> {
@@ -1263,11 +1527,11 @@ async function refreshSettings(): Promise<void> {
   try {
     state.settings = await api.getSettings();
     state.settingsDrafts = {};
-    renderSettingsForm();
-    renderSettingsRepositories();
-    renderSettingsNotion();
-    renderSettingsDiscord();
-    $.settingsEnvFile.textContent = state.settings.envFile;
+   renderSettingsForm();
+   renderSettingsRepositories();
+   renderSettingsNotion();
+   renderSettingsDiscord();
+    renderSettingsApiKey();
     setSettingsMessage("설정을 불러왔습니다.");
   } catch (error) {
     setSettingsMessage(`설정 로드 실패: ${error instanceof Error ? error.message : String(error)}`);
@@ -1283,8 +1547,10 @@ function renderSettingsForm(): void {
   let groupContainer: HTMLElement | null = null;
 
   for (const field of settings.fields) {
-    if (field.key === "HUB_GIT_REPOSITORIES") continue; // managed by Git repositories tab
-    if (field.group !== lastGroup) {
+   if (field.key === "HUB_GIT_REPOSITORIES") continue; // managed by Git repositories tab
+   if (field.key === "HUB_DAILY_AUTOMATION_PROJECTS") continue; // managed by Automation tab
+    if (field.adminOnly) continue; // managed by API 키 tab (관리자 전용)
+   if (field.group !== lastGroup) {
       groupContainer = document.createElement("div");
       groupContainer.className = "settings-group";
       const heading = document.createElement("h3");
@@ -1370,8 +1636,10 @@ function collectSettingsValues(): Record<string, string> {
   const values: Record<string, string> = {};
   if (!state.settings) return values;
   for (const field of state.settings.fields) {
-    if (field.key === "HUB_GIT_REPOSITORIES") continue; // managed by Git repositories tab
-    const input = document.getElementById(`env-${field.key}`) as HTMLInputElement | null;
+   if (field.key === "HUB_GIT_REPOSITORIES") continue; // managed by Git repositories tab
+   if (field.key === "HUB_DAILY_AUTOMATION_PROJECTS") continue; // managed by Automation tab
+    if (field.adminOnly) continue; // managed by API 키 tab (관리자 전용)
+   const input = document.getElementById(`env-${field.key}`) as HTMLInputElement | null;
     const raw = input?.value ?? "";
     if (field.kind === "secret") {
       if (raw !== "") values[field.key] = raw;
@@ -1382,32 +1650,90 @@ function collectSettingsValues(): Record<string, string> {
   return values;
 }
 
+ /** 관리자 전용 API 키 필드(Gemini 등)를 API 키 탭에 렌더링합니다. */
+ function renderSettingsApiKey(): void {
+   const settings = state.settings;
+   $.settingsApikeyGroup.innerHTML = "";
+   if (!settings) return;
+   const fields = settings.fields.filter((field) => field.adminOnly);
+   if (fields.length === 0) {
+     const emptyRow = document.createElement("div");
+     emptyRow.className = "muted";
+     emptyRow.textContent = "관리자 전용 API 키 설정 항목이 없습니다.";
+     $.settingsApikeyGroup.appendChild(emptyRow);
+     return;
+   }
+   for (const field of fields) {
+     $.settingsApikeyGroup.appendChild(settingsFieldRow(field));
+   }
+ }
+ 
+ function collectApiKeyValues(): Record<string, string> {
+   const values: Record<string, string> = {};
+   if (!state.settings) return values;
+   for (const field of state.settings.fields) {
+     if (!field.adminOnly) continue;
+     const input = document.getElementById("env-" + field.key) as HTMLInputElement | null;
+     const raw = input?.value ?? "";
+     if (field.kind === "secret") {
+       if (raw !== "") values[field.key] = raw;
+     } else {
+       values[field.key] = raw;
+     }
+   }
+   return values;
+ }
+ 
+ async function performSaveApiKeySettings(): Promise<void> {
+   const api = settingsHub();
+   if (!api || state.settingsBusy) return;
+   state.settingsBusy = true;
+   $.settingsApikeySave.disabled = true;
+   $.settingsApikeyMessage.textContent = "API 키 저장 중…";
+   $.settingsApikeyMessage.className = "muted";
+   try {
+     const result = await api.saveSettings(collectApiKeyValues());
+     state.settings = result.settings;
+     renderSettingsApiKey();
+     $.settingsApikeyMessage.textContent = result.message || "API 키가 저장되었습니다.";
+     $.settingsApikeyMessage.className = "success-text";
+     void refreshState();
+   } catch (error) {
+     $.settingsApikeyMessage.textContent = "저장 실패: " + (error instanceof Error ? error.message : String(error));
+     $.settingsApikeyMessage.className = "error-text";
+   } finally {
+     state.settingsBusy = false;
+     $.settingsApikeySave.disabled = false;
+   }
+ }
+ 
 async function performSaveSettings(source: "manual" | "auto"): Promise<void> {
   const api = settingsHub();
   if (!api || state.settingsBusy) return;
   state.settingsBusy = true;
   setSettingsBusy(true);
-  setSettingsMessage(source === "auto" ? "자동 저장 중…" : "저장 중…");
+  setSettingsMessage(source === "auto" ? "자동 저장 중…" : "저장 중…", "success");
   try {
     const result = await api.saveSettings(collectSettingsValues());
     state.settings = result.settings;
     state.settingsStatuses = result.statuses;
     state.settingsDrafts = {};
-    renderSettingsForm();
-    renderSettingsRepositories();
-    renderIntegrationStatuses(result.statuses);
-    $.settingsEnvFile.textContent = result.settings.envFile;
+   renderSettingsForm();
+   renderSettingsRepositories();
+   renderIntegrationStatuses(result.statuses);
+    renderSettingsApiKey();
     if (result.restartRequired) {
       $.settingsRestart.hidden = false;
       $.settingsRestart.textContent = "일부 변경 사항(포트 등)은 앱 재시작 후 적용됩니다.";
     } else {
       $.settingsRestart.hidden = true;
     }
-    setSettingsMessage(result.message || (source === "auto" ? "자동 저장 완료." : "저장 완료."));
+    setSettingsMessage(result.message || (source === "auto" ? "자동 저장 완료." : "저장 완료."), "success");
     setStatus(result.message || "Settings saved");
     void refreshState();
+    void checkRepositoryConnections();
   } catch (error) {
-    setSettingsMessage(`저장 실패: ${error instanceof Error ? error.message : String(error)}`);
+    setSettingsMessage(`저장 실패: ${error instanceof Error ? error.message : String(error)}`, "error");
     setStatus("Settings save failed");
   } finally {
     state.settingsBusy = false;
@@ -1434,6 +1760,49 @@ async function performTestIntegrations(): Promise<void> {
     setSettingsBusy(false);
   }
 }
+
+/** 저장소별 Notion DB / Discord 채널 연결 검사를 실행해 상단 상태 점에 즉시 반영합니다. */
+async function checkRepositoryConnections(): Promise<void> {
+  const api = window.hub as unknown as HubSettingsApi & {
+    checkRepositoryConnections?: () => Promise<RepositoryConnectionCheck[]>;
+  };
+  if (typeof api.checkRepositoryConnections !== "function") return;
+  try {
+    const checks = await api.checkRepositoryConnections();
+    const notionByRepo = new Map<string, RepositoryConnectionCheck>();
+    const discordByRepo = new Map<string, RepositoryConnectionCheck>();
+    for (const check of checks) {
+      if (check.integration === "notion") notionByRepo.set(check.repository, check);
+      else discordByRepo.set(check.repository, check);
+    }
+    for (let index = 0; index < state.notionRepositories.length; index += 1) {
+      const item = state.notionRepositories[index];
+      if (!item) continue;
+      const check = notionByRepo.get(item.path);
+      if (check) {
+        state.notionTestStates[index] = {
+          state: check.state === "connected" ? "connected" : "error",
+          message: check.message,
+        };
+      }
+    }
+    for (let index = 0; index < state.discordRepositories.length; index += 1) {
+      const item = state.discordRepositories[index];
+      if (!item) continue;
+      const check = discordByRepo.get(item.path);
+      if (check) {
+        state.discordTestStates[index] = {
+          state: check.state === "connected" ? "connected" : "error",
+          message: check.message,
+        };
+      }
+    }
+    if (state.dashboard) renderHeader(state.dashboard);
+  } catch {
+    // 배치 검사는 보조 기능이므로 실패 시 무시하고 기존 상태를 유지합니다.
+  }
+}
+
 function renderSettingsRepositories(skipAutoLoad = false): void {
   const configured = state.dashboard?.config.repositories ?? [];
   if (!skipAutoLoad && state.repositoryDrafts.length === 0 && configured.length > 0) {
@@ -1651,9 +2020,11 @@ async function saveRepositories(): Promise<void> {
     input?.scrollIntoView({ behavior: "smooth", block: "center" });
     input?.focus();
     $.settingsRepositoriesMessage.textContent = "프로젝트 이름을 입력해야 저장할 수 있습니다.";
+    $.settingsRepositoriesMessage.className = "error-text";
     return;
   }
   $.settingsRepositoriesMessage.textContent = "저장 중…";
+  $.settingsRepositoriesMessage.className = "success-text";
   const payload = state.repositoryDrafts
     .filter((draft) => draft.path.trim().length > 0)
     .map((draft) => ({
@@ -1678,6 +2049,7 @@ async function saveRepositories(): Promise<void> {
     state.settings = result.settings;
     state.settingsStatuses = result.statuses;
     $.settingsRepositoriesMessage.textContent = "저장소 설정이 저장되었습니다.";
+    $.settingsRepositoriesMessage.className = "success-text";
     state.repositoryDrafts = [];
     await refreshState();
     renderSettingsRepositories();
@@ -1685,6 +2057,7 @@ async function saveRepositories(): Promise<void> {
     renderSettingsDiscord();
   } catch (error) {
     $.settingsRepositoriesMessage.textContent = `저장 실패: ${error instanceof Error ? error.message : String(error)}`;
+    $.settingsRepositoriesMessage.className = "error-text";
   }
 }
 
@@ -1709,6 +2082,7 @@ async function saveNotionSettings(): Promise<void> {
   const api = settingsHub();
   if (!api) return;
   $.settingsNotionMessage.textContent = "저장 중...";
+  $.settingsNotionMessage.className = "success-text";
   // 저장소 목록은 config(저장된 원본)를 기준으로 유지하고, Notion DB ID만 덮어쓴다.
   const payload = (state.dashboard?.config.repositories ?? [])
     .filter((draft) => draft.path.trim().length > 0)
@@ -1730,6 +2104,7 @@ async function saveNotionSettings(): Promise<void> {
     void refreshState();
   } catch (error) {
     $.settingsNotionMessage.textContent = "저장 실패: " + (error instanceof Error ? error.message : String(error));
+    $.settingsNotionMessage.className = "error-text";
   }
 }
 
@@ -2024,6 +2399,7 @@ async function saveDiscordSettings(): Promise<void> {
   const api = settingsHub();
   if (!api) return;
   $.settingsDiscordMessage.textContent = "저장 중...";
+  $.settingsDiscordMessage.className = "success-text";
   // 저장소 목록은 config(저장된 원본)를 기준으로 유지하고, Discord 채널 ID만 덮어쓴다.
   const payload = (state.dashboard?.config.repositories ?? [])
     .filter((draft) => draft.path.trim().length > 0)
@@ -2049,6 +2425,7 @@ async function saveDiscordSettings(): Promise<void> {
     void refreshState();
   } catch (error) {
     $.settingsDiscordMessage.textContent = "저장 실패: " + (error instanceof Error ? error.message : String(error));
+    $.settingsDiscordMessage.className = "error-text";
   }
 }
 
@@ -2117,6 +2494,9 @@ function bindEvents(): void {
   const primaryCard = $.gitRepository.closest<HTMLElement>(".card");
   if (primaryCard) trackCardFocus(primaryCard);
   mountDashboardMainGitCard();
+  $.themeToggle.addEventListener("click", () => {
+    applyTheme(document.body.classList.contains("theme-light") ? "dark" : "light");
+  });
   $.refreshState.addEventListener("click", () => void refreshState());
   $.mainTabDashboard.addEventListener("click", () => switchMainPanel("dashboard"));
   $.mainTabAutomation.addEventListener("click", () => switchMainPanel("automation"));
@@ -2125,6 +2505,17 @@ function bindEvents(): void {
     document.querySelectorAll(".dashboard-extra-card").forEach((card) => card.remove());
     restoreProjectWorkBranches();
     restoreProjectActiveBranches();
+    // 선택한 프로젝트의 연결 경로/메시지를 반영합니다.
+    const selProject = $.dashboardProject.value || "";
+    state.projectConnectPath = selProject ? (state.projectConnectPaths[selProject] ?? "") : "";
+    state.projectConnectMessage = selProject ? (state.projectConnectMessages[selProject] ?? "") : "";
+    if (state.projectConnectMessage) {
+      $.projectConnectMessage.textContent = state.projectConnectMessage;
+      $.projectConnectMessage.className = "muted";
+    } else {
+      $.projectConnectMessage.textContent = "경로가 지정되지 않았습니다.";
+      $.projectConnectMessage.className = "error-text";
+    }
     renderGitRepositoryOptions();
     if (mainGitController) void mainGitController.refresh();
     restoreDashboardGitCards();
@@ -2148,6 +2539,7 @@ function bindEvents(): void {
     }
   });
   $.dashboardAddCard.addEventListener("click", () => addDashboardGitCard());
+  $.projectConnectChoose.addEventListener("click", () => void chooseProjectConnectFolder());
   $.settingsTabEnv.addEventListener("click", () => switchSettingsPanel("env"));
   $.settingsTabGit.addEventListener("click", () => switchSettingsPanel("git"));
   $.settingsTabNotion.addEventListener("click", () => {
@@ -2159,8 +2551,12 @@ function bindEvents(): void {
     renderSettingsDiscord();
   });
   $.settingsDiscordSave.addEventListener("click", () => void saveDiscordSettings());
-  $.settingsTabStatus.addEventListener("click", () => switchSettingsPanel("status"));
-  $.settingsTabLicense.addEventListener("click", () => switchSettingsPanel("license"));
+ $.settingsTabLicense.addEventListener("click", () => switchSettingsPanel("license"));
+  $.settingsTabApikey.addEventListener("click", () => {
+    switchSettingsPanel("apikey");
+    renderSettingsApiKey();
+  });
+  $.settingsApikeySave.addEventListener("click", () => void performSaveApiKeySettings());
   $.settingsLicenseChange.addEventListener("click", async () => {
     const key = $.settingsLicenseKey.value.trim();
     if (!key) { $.settingsLicenseMessage.textContent = "새 라이선스 키를 입력하세요."; return; }
@@ -2175,7 +2571,6 @@ function bindEvents(): void {
     }
   });
   $.settingsTest.addEventListener("click", () => void performTestIntegrations());
-  $.settingsTestStatus.addEventListener("click", () => void performTestIntegrations());
   $.settingsForm.addEventListener("submit", (event) => {
     event.preventDefault();
     window.clearTimeout(state.autoSaveTimer);
@@ -2198,12 +2593,15 @@ function bindEvents(): void {
 }
 
 async function init(): Promise<void> {
+  initializeTheme();
   bindEvents();
   setStatus("Connecting to hub…");
+  await loadGitSelectionState();
   await refreshState();
   state.gitWorkBranches = [];
   restoreProjectWorkBranches();
   restoreProjectActiveBranches();
+  restoreDashboardGitCards();
   if (mainGitController) void mainGitController.refresh();
   if (settingsHub()) {
     void refreshSettings();
@@ -2217,8 +2615,11 @@ async function init(): Promise<void> {
   });
   setInterval(() => {
     if (state.dashboard && settingsHub()) void performTestIntegrations();
+    void checkRepositoryConnections();
   }, 60_000);
   if (settingsHub()) void performTestIntegrations();
+  // 앱 시작 시 저장소별 Notion/Discord 연결 상태를 배치 검사해 상단 점에 반영합니다.
+  void checkRepositoryConnections();
 }
 
 void init();

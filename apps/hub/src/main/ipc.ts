@@ -2,6 +2,7 @@ import { app, dialog, ipcMain, type BrowserWindow } from "electron";
 import { z } from "zod";
 import type { HubRuntime } from "./hub-runtime";
 import type { LicenseService } from "./license-service";
+import { sanitizeSelectionState } from "./git-selection-store";
 
 const branchSchema = z.object({
   repository: z.string().min(1).optional(),
@@ -29,6 +30,13 @@ const discordChannelSchema = z.object({
   repository: z.string().optional(),
   channelId: z.string().max(256),
 });
+const cloneRepositorySchema = z.object({
+  url: z.string().min(1).max(2048),
+  directory: z.string().min(1).max(4096),
+});
+const connectRepositorySchema = z.object({
+  directory: z.string().min(1).max(4096),
+});
 const manualDailyReportSchema = z.object({
   date: z.string().min(1),
   sinceIso: z.string().min(1),
@@ -55,7 +63,7 @@ export function registerLicenseIpc(getLicenseService?: () => LicenseService | nu
       activated: true,
       keyId: stored?.keyId,
       owner: stored?.owner,
-      role: stored?.role ?? "user",
+      role: service.getEffectiveRole(),
       expiresAt: stored?.expiresAt,
       reason: undefined,
     };
@@ -133,6 +141,19 @@ export function registerIpc(
     const input = manualDailyReportSchema.parse(raw);
     return runtime.reportManualDailyReport(input);
   });
+  ipcMain.handle("hub:get-projects", () => runtime.getProjects());
+  ipcMain.handle("hub:clone-git-repository", (_event, raw) => {
+    const input = cloneRepositorySchema.parse(raw);
+    return runtime.cloneGitRepository(input);
+  });
+  ipcMain.handle("hub:connect-git-repository", (_event, raw) => {
+    const input = connectRepositorySchema.parse(raw);
+    return runtime.connectGitRepository(input);
+  });
+  ipcMain.handle("hub:connect-or-clone-git-repository", (_event, raw) => {
+    const input = cloneRepositorySchema.parse(raw);
+    return runtime.connectOrCloneGitRepository(input);
+  });
   ipcMain.handle("hub:choose-git-repository", async () => {
     const window = getWindow();
     const options = {
@@ -150,6 +171,8 @@ export function registerIpc(
   });
   ipcMain.handle("hub:get-settings", () => runtime.getSettings());
   ipcMain.handle("hub:save-settings", (_event, raw: unknown) => runtime.saveSettings(settingsSchema.parse(raw)));
+  ipcMain.handle("hub:get-git-selection", () => runtime.getGitSelection());
+  ipcMain.handle("hub:save-git-selection", (_event, raw: unknown) => runtime.saveGitSelection(sanitizeSelectionState(raw)));
   ipcMain.handle("hub:test-integrations", () => runtime.testIntegrations());
   ipcMain.handle("hub:test-notion-database", (_event, raw: unknown) => {
     const input = notionDatabaseSchema.parse(raw ?? {});
@@ -159,6 +182,7 @@ export function registerIpc(
     const input = discordChannelSchema.parse(raw ?? {});
     return runtime.testDiscordChannel(input);
   });
+  ipcMain.handle("hub:check-repository-connections", () => runtime.checkRepositoryConnections());
   const stateListener = (state: unknown): void => {
     const window = getWindow();
     if (window && !window.isDestroyed()) window.webContents.send("hub:state-changed", state);
@@ -179,11 +203,15 @@ export function registerIpc(
       "hub:report-manual-daily-report",
       "hub:choose-git-repository",
       "hub:list-git-remote-branches",
+      "hub:connect-or-clone-git-repository",
       "hub:get-settings",
       "hub:save-settings",
+      "hub:get-git-selection",
+      "hub:save-git-selection",
       "hub:test-integrations",
       "hub:test-notion-database",
       "hub:test-discord-channel",
+      "hub:check-repository-connections",
     ]) {
       ipcMain.removeHandler(channel);
     }

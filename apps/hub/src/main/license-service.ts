@@ -7,6 +7,7 @@ const DEFAULT_MANIFEST_URL =
   "https://raw.githubusercontent.com/KCWJEDI/KJ_FlowForge_Config/main/licenses.json";
 const FETCH_TIMEOUT_MS = 8_000;
 const GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+const VERIFY_INTERVAL_MS = 60 * 60 * 1000;
 
 interface ManifestEntry {
   id: string;
@@ -46,10 +47,13 @@ function normalizeRole(value: unknown): LicenseRole {
 
 export class LicenseService {
   private stored: StoredLicense | null = null;
+  private verificationTimer: ReturnType<typeof setInterval> | null = null;
+  private offlineGrace = false;
+  private verificationRunning = false;
 
   public constructor(
     private readonly userDataPath: string,
-    private readonly options: { manifestUrl?: string; githubToken?: string } = {},
+    private readonly options: { manifestUrl?: string; githubToken?: string; onRoleChanged?: (role: LicenseRole) => void } = {},
   ) {}
 
   private get licenseFile(): string {
@@ -89,6 +93,10 @@ export class LicenseService {
     return { activated: false, reason: "grace-offline" };
   }
 
+  public getEffectiveRole(): LicenseRole {
+    return this.offlineGrace ? "user" : this.stored?.role ?? "user";
+  }
+
   public async verifyOnStartup(): Promise<{
     activated: boolean;
     reason: "missing" | "grace-offline" | "invalid" | "blocked" | undefined;
@@ -97,12 +105,17 @@ export class LicenseService {
     const stored = await this.loadStored();
     if (!stored) return { activated: false, reason: "missing" };
     const result = await this.check(stored.key);
-    if (result.status === "ok") return { activated: true, reason: undefined, role: result.role };
+    if (result.status === "ok") {
+      this.offlineGrace = false;
+      return { activated: true, reason: undefined, role: result.role };
+    }
     if (result.status === "blocked") return { activated: false, reason: "blocked" };
     if (result.status === "offline") {
       const status = this.getStatus();
       if (!status.activated) return { activated: false, reason: "grace-offline" };
-      return { activated: true, reason: undefined, role: this.stored?.role ?? "user" };
+      this.offlineGrace = true;
+      // Offline grace never carries administrator authority.
+      return { activated: true, reason: undefined, role: "user" };
     }
     await this.clear();
     return { activated: false, reason: "invalid" };
@@ -110,6 +123,44 @@ export class LicenseService {
 
   public peek(): StoredLicense | null {
     return this.stored;
+  }
+
+  public startPeriodicVerification(): void {
+    this.stopPeriodicVerification();
+    this.verificationTimer = setInterval(() => {
+      void this.verifyStoredKey();
+    }, VERIFY_INTERVAL_MS);
+    this.verificationTimer.unref?.();
+  }
+
+  public stopPeriodicVerification(): void {
+    if (this.verificationTimer) clearInterval(this.verificationTimer);
+    this.verificationTimer = null;
+  }
+
+  private async verifyStoredKey(): Promise<void> {
+    if (this.verificationRunning) return;
+    this.verificationRunning = true;
+    try {
+    const key = this.stored?.key;
+    if (!key) return;
+    const previousRole = this.offlineGrace ? "user" : this.stored?.role ?? "user";
+    const result = await this.check(key);
+    if (result.status === "ok") {
+      this.offlineGrace = false;
+      if (previousRole !== result.role) this.options.onRoleChanged?.(result.role);
+      return;
+    }
+    if (result.status === "offline") {
+      this.offlineGrace = true;
+      if (previousRole === "admin") this.options.onRoleChanged?.("user");
+      return;
+    }
+    await this.clear();
+    this.options.onRoleChanged?.("user");
+    } finally {
+      this.verificationRunning = false;
+    }
   }
 
   public async check(rawKey: string): Promise<LicenseCheckResult> {
@@ -141,6 +192,7 @@ export class LicenseService {
 
   public async clear(): Promise<void> {
     this.stored = null;
+    this.offlineGrace = false;
     try {
       await fs.rm(this.licenseFile, { force: true });
     } catch {
