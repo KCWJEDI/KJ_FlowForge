@@ -11,7 +11,9 @@
       "role": "owner",
       "enabled": true,
       "login": "KCWJEDI",
-      "parts": []
+      "parts": [
+        "파트장"
+      ]
     }
   ],
   "parts": [
