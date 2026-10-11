@@ -14,7 +14,9 @@
       "parts": []
     }
   ],
-  "parts": [],
+  "parts": [
+    "파트장"
+  ],
   "partsUnified": true,
   "workflowSheet": {
     "schemaVersion": 2,
@@ -58,6 +60,15 @@
     ],
     "routes": []
   },
+  "roles": [
+    {
+      "id": "role-596d643b-e22e-452d-9478-3c14c22c06d8",
+      "name": "파트장",
+      "permissions": [
+        "role.manage"
+      ]
+    }
+  ],
   "workflowStages": [
     {
       "id": "todo",
