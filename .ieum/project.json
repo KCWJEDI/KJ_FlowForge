@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "projectId": "project-dd2da8a8-f28d-449d-83bd-03d835f1b49c",
+  "name": "FlowForge",
+  "ownerId": "gh-122228166",
+  "founderId": "gh-122228166",
+  "members": [
+    {
+      "id": "gh-122228166",
+      "name": "KCWJEDI",
+      "role": "owner",
+      "enabled": true,
+      "login": "KCWJEDI",
+      "parts": []
+    }
+  ],
+  "parts": [],
+  "partsUnified": true,
+  "workflowSheet": {
+    "schemaVersion": 2,
+    "nodes": [
+      {
+        "id": "todo",
+        "stageId": "todo",
+        "x": -375.0,
+        "y": 0.0
+      },
+      {
+        "id": "doing",
+        "stageId": "doing",
+        "x": -225.0,
+        "y": 0.0
+      },
+      {
+        "id": "review",
+        "stageId": "review",
+        "x": -75.0,
+        "y": 0.0
+      },
+      {
+        "id": "done",
+        "stageId": "done",
+        "x": 75.0,
+        "y": 0.0
+      },
+      {
+        "id": "hold",
+        "stageId": "hold",
+        "x": 225.0,
+        "y": 0.0
+      },
+      {
+        "id": "drop",
+        "stageId": "drop",
+        "x": 375.0,
+        "y": 0.0
+      }
+    ],
+    "routes": []
+  },
+  "workflowStages": [
+    {
+      "id": "todo",
+      "name": "확인중"
+    },
+    {
+      "id": "doing",
+      "name": "진행중"
+    },
+    {
+      "id": "review",
+      "name": "검토중",
+      "editPolicy": "recipients"
+    },
+    {
+      "id": "done",
+      "name": "완료"
+    },
+    {
+      "id": "hold",
+      "name": "보류",
+      "editPolicy": "locked"
+    },
+    {
+      "id": "drop",
+      "name": "드랍",
+      "editPolicy": "locked"
+    }
+  ],
+  "workflowStagesConfigured": true,
+  "workflowDefaultsVersion": 2,
+  "workflowAutomationDetached": true,
+  "workflowAutomation": {
+    "reviewEnabled": false,
+    "reworkEnabled": false,
+    "connections": []
+  }
+}
