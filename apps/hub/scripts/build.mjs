@@ -13,6 +13,7 @@ await Promise.all([
   cp(path.join(root, "src/renderer/index.html"), path.join(dist, "renderer/index.html")),
   cp(path.join(root, "src/renderer/styles.css"), path.join(dist, "renderer/styles.css")),
   cp(path.join(root, "src/renderer/license.html"), path.join(dist, "renderer/license.html")),
+  cp(path.join(root, "src/renderer/icon.png"), path.join(dist, "renderer/icon.png")),
 ]);
 
 const targets = [
@@ -21,7 +22,9 @@ const targets = [
     outfile: "dist/main/index.cjs",
     platform: "node",
     format: "cjs",
-    external: ["electron"],
+    // electron-updater는 런타임에 app-update.yml을 읽고 지연 require를 사용하므로
+    // 번들하지 않고 node_modules에서 로드합니다.
+    external: ["electron", "electron-updater"],
   },
   {
     entryPoints: ["src/preload/index.ts"],

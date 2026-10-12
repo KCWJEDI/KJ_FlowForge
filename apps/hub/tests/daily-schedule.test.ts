@@ -12,7 +12,8 @@ import {
 } from "../src/main/automation/daily-schedule";
 import type { HubConfig } from "../src/main/config";
 import type { GitService } from "../src/main/git/git-service";
-import type { NotionAdapter } from "../src/main/integrations/notion-adapter";
+import { NotionAdapter } from "../src/main/integrations/notion-adapter";
+import { removeDirSafely } from "./helpers/cleanup";
 
 describe("daily automation schedule", () => {
   it("filters Discord branches and applies the repository commit threshold", () => {
@@ -59,7 +60,7 @@ describe("daily automation state store", () => {
   let directory: string | null = null;
 
   afterEach(async () => {
-    if (directory) await rm(directory, { recursive: true, force: true });
+    if (directory) await removeDirSafely(directory);
     directory = null;
   });
 
@@ -93,13 +94,17 @@ describe("daily automation reporting", () => {
   let directory: string | null = null;
 
   afterEach(async () => {
-    if (directory) await rm(directory, { recursive: true, force: true });
+    if (directory) await removeDirSafely(directory);
+    vi.restoreAllMocks();
     directory = null;
   });
 
   it("creates a date-only baseline report on the first run", async () => {
     directory = await mkdtemp(path.join(tmpdir(), "hub-daily-run-"));
     const createDailyWorkReport = vi.fn().mockResolvedValue("page-1");
+    vi.spyOn(NotionAdapter, "forToken").mockReturnValue(
+      { enabled: true, createDailyWorkReport } as unknown as NotionAdapter,
+    );
     const automation = new DailyAutomation({
       config: testConfig(directory),
       git: fakeGitService([]),
@@ -123,12 +128,16 @@ describe("daily automation reporting", () => {
 
   it("keeps a pending baseline when Notion reporting fails", async () => {
     directory = await mkdtemp(path.join(tmpdir(), "hub-daily-run-"));
+    const createDailyWorkReport = vi.fn().mockRejectedValue(new Error("Notion unavailable"));
+    vi.spyOn(NotionAdapter, "forToken").mockReturnValue(
+      { enabled: true, createDailyWorkReport } as unknown as NotionAdapter,
+    );
     const automation = new DailyAutomation({
       config: testConfig(directory),
       git: fakeGitService([]),
       notion: {
         enabled: true,
-        createDailyWorkReport: vi.fn().mockRejectedValue(new Error("Notion unavailable")),
+        createDailyWorkReport,
       } as unknown as NotionAdapter,
       onChanged: () => undefined,
     });
@@ -204,6 +213,9 @@ describe("daily automation reporting", () => {
       }),
     );
     const createDailyWorkReport = vi.fn().mockResolvedValue("page-1");
+    vi.spyOn(NotionAdapter, "forToken").mockReturnValue(
+      { enabled: true, createDailyWorkReport } as unknown as NotionAdapter,
+    );
     const automation = new DailyAutomation({
       config,
       git: fakeGitService([], {
@@ -235,7 +247,51 @@ describe("daily automation reporting", () => {
     await automation.stop();
   });
 
+  it("carries over legacy remote: state keys when the normalization rules change", async () => {
+    directory = await mkdtemp(path.join(tmpdir(), "hub-daily-run-"));
+    const config = testConfig(directory);
+    // 과거 정규화 규칙으로 저장된 키(대문자 경로). 원격 정규화가 소문자로 통일된 뒤에도
+    // 이 이력을 이어받아 같은 브랜치가 다시 baseline 으로 잡히지 않아야 합니다.
+    const legacyKey = "remote:github.com/EXAMPLE/repository|origin|main";
+    await new DailyAutomationStateStore(directory).write({
+      version: 1,
+      reportedHeads: { [legacyKey]: "main-old" },
+      pendingBaselines: {},
+    });
+    const captureBranchCommits = vi.fn().mockImplementation(
+      (repository: string, branch: string, previousHead: string | null) => Promise.resolve({
+        repository,
+        branch,
+        previousHead,
+        currentHead: "main-new",
+        commits: [],
+      }),
+    );
+    const createDailyWorkReport = vi.fn().mockResolvedValue("page-1");
+    vi.spyOn(NotionAdapter, "forToken").mockReturnValue(
+      { enabled: true, createDailyWorkReport } as unknown as NotionAdapter,
+    );
+    const automation = new DailyAutomation({
+      config,
+      git: fakeGitService([], { branches: ["main"], captureBranchCommits }),
+      notion: { enabled: true, createDailyWorkReport } as unknown as NotionAdapter,
+      onChanged: () => undefined,
+    });
+    await automation.start();
+
+    const run = await automation.run("manual");
+
+    expect(run.status).toBe("succeeded");
+    // 기존 이력을 이어받아 과거 head 를 기준으로 비교해야 합니다(새 baseline 으로 리셋되지 않음).
+    expect(captureBranchCommits).toHaveBeenCalledWith(config.repositories[0]!.path, "main", "main-old");
+    const state = await new DailyAutomationStateStore(directory).read();
+    expect(state.reportedHeads["remote:github.com/example/repository|origin|main"]).toBe("main-new");
+    expect(state.reportedHeads[legacyKey]).toBeUndefined();
+    await automation.stop();
+  });
+
 });
+
 
 function testConfig(dataDirectory: string): HubConfig {
   return {
@@ -245,7 +301,20 @@ function testConfig(dataDirectory: string): HubConfig {
     commandTimeoutMs: 30_000,
     maxFrameBytes: 8 * 1024 * 1024,
     apiToken: "test",
-    repositories: [{ label: "기본", path: "C:\\fake-repository", url: "", branches: ["main"] }],
+    repositories: [{
+      label: "기본",
+      username: "",
+      defaultBranch: "",
+      path: "C:\\fake-repository",
+      url: "",
+      branches: ["main"],
+      discordMinCommits: 0,
+      discordBranches: [],
+      project: "",
+      notionDatabaseId: "test-db",
+      notionToken: "test-token",
+      discordChannelId: "",
+    }],
     envFile: path.join(dataDirectory, ".env"),
     dataDirectory,
     projectsUrl: "",
@@ -254,9 +323,10 @@ function testConfig(dataDirectory: string): HubConfig {
     sessionSecret: "test",
     dailyAutomation: { enabled: false },
     discord: {},
-    notion: { token: "test", databaseId: "test" },
+    notion: { enabled: false },
     github: {},
     gemini: { apiKey: "", model: "gemini-3.5-flash-lite" },
+    sshKeyPath: "",
   };
 }
 

@@ -1,16 +1,21 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DashboardState, HubApi } from "../shared/ipc";
+import type { DashboardState, HubApi, UpdateStatus } from "../shared/ipc";
 
 const api: HubApi = {
   getState: () => ipcRenderer.invoke("hub:get-state"),
   inspectGit: (repository) => ipcRenderer.invoke("hub:inspect-git", repository),
   listGitBranches: (repository) => ipcRenderer.invoke("hub:list-git-branches", repository),
+  watchRepository: (directory) => ipcRenderer.invoke("hub:watch-repository", directory),
+  unwatchRepository: (directory) => ipcRenderer.invoke("hub:unwatch-repository", directory),
   switchGitBranch: (args) => ipcRenderer.invoke("hub:switch-git-branch", args),
   gitCreateBranch: (args) => ipcRenderer.invoke("hub:git-create-branch", args),
   gitStage: (args) => ipcRenderer.invoke("hub:git-stage", args),
+  gitDiscardPreview: (repository) => ipcRenderer.invoke("hub:git-discard-preview", repository),
+  gitDiscard: (args) => ipcRenderer.invoke("hub:git-discard", args),
   gitCommit: (args) => ipcRenderer.invoke("hub:git-commit", args),
   gitPush: (args) => ipcRenderer.invoke("hub:git-push", args),
   gitPushBranch: (args) => ipcRenderer.invoke("hub:git-push-branch", args),
+  gitPull: (args) => ipcRenderer.invoke("hub:git-pull", args),
   getDailyAutomation: () => ipcRenderer.invoke("hub:get-daily-automation"),
   runDailyAutomation: () => ipcRenderer.invoke("hub:run-daily-automation"),
   reportManualDailyReport: (args) => ipcRenderer.invoke("hub:report-manual-daily-report", args),
@@ -31,10 +36,23 @@ const api: HubApi = {
   getLicenseStatus: () => ipcRenderer.invoke("hub:get-license-status"),
   activateLicense: (key) => ipcRenderer.invoke("hub:activate-license", { key }),
   replaceLicense: (key) => ipcRenderer.invoke("hub:replace-license", { key }),
+  getUpdateStatus: () => ipcRenderer.invoke("hub:get-update-status"),
+  checkForUpdates: () => ipcRenderer.invoke("hub:check-for-updates"),
+  installUpdate: () => ipcRenderer.invoke("hub:install-update"),
+  onUpdateStatus: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, status: UpdateStatus): void => listener(status);
+    ipcRenderer.on("hub:update-status", wrapped);
+    return () => ipcRenderer.removeListener("hub:update-status", wrapped);
+  },
   onStateChanged: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, state: DashboardState): void => listener(state);
     ipcRenderer.on("hub:state-changed", wrapped);
     return () => ipcRenderer.removeListener("hub:state-changed", wrapped);
+  },
+  onRepositoryChanged: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, repository: string): void => listener(repository);
+    ipcRenderer.on("hub:repository-changed", wrapped);
+    return () => ipcRenderer.removeListener("hub:repository-changed", wrapped);
   },
 };
 

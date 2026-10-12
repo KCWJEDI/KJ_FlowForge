@@ -1,14 +1,20 @@
 {
   "name": "local-unity-workflow-hub",
-  "version": "0.3.79",
+  "version": "0.4.14",
   "private": true,
   "description": "Local Electron hub for Unity, Discord, Notion, and GitHub workflows",
+  "author": {
+    "name": "KCWJEDI"
+  },
   "main": "dist/main/index.cjs",
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/build.mjs --watch",
     "start": "npm run build && electron .",
-    "package:win": "npm run build && electron-builder --win portable",
+    "package:win": "npm run build && electron-builder --win nsis",
+    "package:portable": "npm run build && electron-builder --win portable",
+    "package:run": "node scripts/package-and-run.mjs",
+    "release:prepare": "node scripts/release.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -17,6 +23,7 @@
     "@octokit/rest": "^21.1.1",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.7",
+    "electron-updater": "^6.8.9",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -43,17 +50,34 @@
       "node_modules/**/*"
     ],
     "win": {
-      "signAndEditExecutable": false,
+      "signAndEditExecutable": true,
       "target": [
         {
-          "target": "portable",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
         }
       ],
-      "artifactName": "KJ-FlowForge-${version}-${arch}.exe"
+      "artifactName": "KJ-FlowForge-Setup-${version}-${arch}.exe"
     },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "KJ FlowForge",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "KCWJEDI",
+        "repo": "KJ_FlowForge_Releases",
+        "releaseType": "release"
+      }
+    ],
     "electronDist": "node_modules/electron/dist"
   }
 }

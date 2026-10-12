@@ -2,6 +2,7 @@ const message = document.getElementById("license-message");
 const keyInput = document.getElementById("license-key") as HTMLInputElement | null;
 const submit = document.getElementById("license-submit") as HTMLButtonElement | null;
 const cancel = document.getElementById("license-cancel") as HTMLButtonElement | null;
+const closeButton = document.getElementById("license-close") as HTMLButtonElement | null;
 const error = document.getElementById("license-error");
 
 if (message) message.textContent = decodeURIComponent(location.hash.slice(1)) || "유효한 키를 입력해 주세요.";
@@ -16,6 +17,14 @@ keyInput?.addEventListener("keydown", (event) => {
 
 cancel?.addEventListener("click", () => {
   window.close();
+});
+
+closeButton?.addEventListener("click", () => {
+  window.close();
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") window.close();
 });
 
 async function activate(): Promise<void> {

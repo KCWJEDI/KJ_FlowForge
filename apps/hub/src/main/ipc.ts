@@ -2,6 +2,7 @@ import { app, dialog, ipcMain, type BrowserWindow } from "electron";
 import { z } from "zod";
 import type { HubRuntime } from "./hub-runtime";
 import type { LicenseService } from "./license-service";
+import type { UpdaterService } from "./updater-service";
 import { sanitizeSelectionState } from "./git-selection-store";
 
 const branchSchema = z.object({
@@ -16,6 +17,11 @@ const stageSchema = z.object({
 const commitSchema = z.object({ repository: z.string().min(1).optional() });
 const pushSchema = z.object({ repository: z.string().min(1).optional() });
 const pushBranchSchema = z.object({
+  repository: z.string().min(1).optional(),
+  branch: z.string().min(1),
+  remote: z.string().min(1).optional(),
+});
+const pullSchema = z.object({
   repository: z.string().min(1).optional(),
   branch: z.string().min(1),
   remote: z.string().min(1).optional(),
@@ -104,12 +110,24 @@ export function registerIpc(
   runtime: HubRuntime,
   getWindow: () => BrowserWindow | null,
   getLicenseService?: () => LicenseService | null,
+  getUpdaterService?: () => UpdaterService | null,
 ): () => void {
   const optionalRepository = (value: unknown): string | undefined =>
     typeof value === "string" && value.trim() ? value : undefined;
 
   ipcMain.handle("hub:get-state", () => runtime.getState());
   ipcMain.handle("hub:inspect-git", (_event, repository?: unknown) => runtime.inspectGit(optionalRepository(repository)));
+  // 연결된 폴더의 변경 감시(자동 새로고침) 시작/중지
+  ipcMain.handle("hub:watch-repository", (_event, raw: unknown) => {
+    const directory = z.string().min(1).max(4096).parse(raw);
+    runtime.watchRepository(directory);
+    return true;
+  });
+  ipcMain.handle("hub:unwatch-repository", (_event, raw: unknown) => {
+    const directory = z.string().min(1).max(4096).parse(raw);
+    runtime.unwatchRepository(directory);
+    return true;
+  });
   ipcMain.handle("hub:list-git-branches", (_event, repository?: unknown) => runtime.listGitBranches(optionalRepository(repository)));
   ipcMain.handle("hub:switch-git-branch", (_event, raw: unknown) => {
     const input = z.object({ repository: z.string().min(1).optional(), branch: z.string().min(1) }).parse(raw);
@@ -123,6 +141,15 @@ export function registerIpc(
     const input = stageSchema.parse(raw);
     return runtime.gitStage(optionalRepository(input.repository), input.paths);
   });
+  ipcMain.handle("hub:git-discard-preview", (_event, repository?: unknown) =>
+    runtime.gitDiscardPreview(optionalRepository(repository)));
+  ipcMain.handle("hub:git-discard", (_event, raw: unknown) => {
+    const input = z.object({
+      repository: z.string().min(1).optional(),
+      includeUntracked: z.boolean().optional(),
+    }).parse(raw ?? {});
+    return runtime.gitDiscardChanges(optionalRepository(input.repository), input.includeUntracked ?? false);
+  });
   ipcMain.handle("hub:git-commit", (_event, raw: unknown) => {
     const input = commitSchema.parse(raw);
     return runtime.gitCommitWithSummary(optionalRepository(input.repository));
@@ -134,6 +161,10 @@ export function registerIpc(
   ipcMain.handle("hub:git-push-branch", (_event, raw: unknown) => {
     const input = pushBranchSchema.parse(raw);
     return runtime.gitPushBranch(optionalRepository(input.repository), input.branch, input.remote ?? "origin");
+  });
+  ipcMain.handle("hub:git-pull", (_event, raw: unknown) => {
+    const input = pullSchema.parse(raw);
+    return runtime.gitPull(optionalRepository(input.repository), input.branch, input.remote ?? "origin");
   });
   ipcMain.handle("hub:get-daily-automation", () => runtime.getDailyAutomation());
   ipcMain.handle("hub:run-daily-automation", () => runtime.runDailyAutomation());
@@ -188,16 +219,47 @@ export function registerIpc(
     if (window && !window.isDestroyed()) window.webContents.send("hub:state-changed", state);
   };
   runtime.on("stateChanged", stateListener);
+  // 폴더 변경 감지 시 렌더러에 알려 자동 새로고침합니다.
+  const repositoryChangedListener = (repository: unknown): void => {
+    const window = getWindow();
+    if (typeof repository === "string" && window && !window.isDestroyed()) {
+      window.webContents.send("hub:repository-changed", repository);
+    }
+  };
+  runtime.on("repositoryChanged", repositoryChangedListener);
+
+  // ----- 자동 업데이트 -----
+  const updaterStatusListener = (status: unknown): void => {
+    const window = getWindow();
+    if (window && !window.isDestroyed()) window.webContents.send("hub:update-status", status);
+  };
+  const updater = getUpdaterService?.() ?? null;
+  updater?.on("status", updaterStatusListener);
+  ipcMain.handle("hub:get-update-status", () => getUpdaterService?.()?.getStatus() ?? null);
+  ipcMain.handle("hub:check-for-updates", () => getUpdaterService?.()?.checkNow() ?? null);
+  ipcMain.handle("hub:install-update", () => {
+    const service = getUpdaterService?.();
+    if (!service || service.getStatus().phase !== "downloaded") return false;
+    service.install();
+    return true;
+  });
   return () => {
     runtime.off("stateChanged", stateListener);
+    runtime.off("repositoryChanged", repositoryChangedListener);
+    updater?.off("status", updaterStatusListener);
     for (const channel of [
       "hub:get-state",
       "hub:inspect-git",
+      "hub:watch-repository",
+      "hub:unwatch-repository",
       "hub:git-create-branch",
       "hub:git-stage",
+      "hub:git-discard-preview",
+      "hub:git-discard",
       "hub:git-commit",
       "hub:git-push",
       "hub:git-push-branch",
+      "hub:git-pull",
       "hub:get-daily-automation",
       "hub:run-daily-automation",
       "hub:report-manual-daily-report",
@@ -212,6 +274,9 @@ export function registerIpc(
       "hub:test-notion-database",
       "hub:test-discord-channel",
       "hub:check-repository-connections",
+      "hub:get-update-status",
+      "hub:check-for-updates",
+      "hub:install-update",
     ]) {
       ipcMain.removeHandler(channel);
     }

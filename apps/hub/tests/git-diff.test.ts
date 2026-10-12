@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { classifyPurpose, parseNameStatus, parseNumstat } from "../src/main/git/git-diff";
 import { GitService } from "../src/main/git/git-service";
+import { removeDirSafely } from "./helpers/cleanup";
 
 const exec = promisify(execFile);
 
@@ -68,7 +69,7 @@ describe("GitService commit diff capture", () => {
   let directory: string | null = null;
 
   afterEach(async () => {
-    if (directory) await rm(directory, { recursive: true, force: true });
+    if (directory) await removeDirSafely(directory);
     directory = null;
   });
 

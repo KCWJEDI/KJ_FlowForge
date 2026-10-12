@@ -1,11 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { GitRepositorySetting, ProjectDefinition, ProjectView } from "../shared/ipc";
+import { isSameRepository } from "../shared/repo-identity";
 
 export function sameIdentity(a: string, b: string): boolean {
-  const strip = (value: string): string =>
-    value.trim().replace(/^(https?|ssh|git):\/\//i, "").replace(/^git@/i, "").replace(/\.git$/i, "").replace(/\/$/, "");
-  return Boolean(a && b) && strip(a) === strip(b);
+  // 원격 URL 동일성 판정은 shared/repo-identity 의 단일 구현만 사용합니다.
+  // (SCP 형식 git@host:path 와 스킴 형식을 모두 동일하게 취급)
+  return isSameRepository(a, b);
 }
 
 function slugify(value: string): string {
@@ -178,10 +179,41 @@ async function readProjectsCache(cacheFilePath: string): Promise<ProjectDefiniti
   }
 }
 
-async function defaultFetchText(url: string): Promise<string> {
-  const response = await fetch(url);
+/** raw.githubusercontent.com URL을 api.github.com contents URL로 변환합니다. */
+export function toGithubApiUrl(rawUrl: string): string | null {
+    const trimmed = rawUrl.trim();
+  const marker = 'https://raw.githubusercontent.com/';
+  if (!trimmed.startsWith(marker)) return null;
+  const rest = trimmed.slice(marker.length).split('/');
+  if (rest.length < 4) return null;
+  const owner = rest.shift() || '';
+  const repo = rest.shift() || '';
+  const ref = rest.shift() || '';
+  const filePath = rest.join('/');
+  if (!owner || !repo || !ref || !filePath) return null;
+  return 'https://api.github.com/repos/' + owner + '/' + repo + '/contents/' + filePath + '?ref=' + ref;
+}
+
+/** GitHub API(최신 커밋 기준)를 먼저, 실패하면 raw CDN을 사용합니다. CDN이 이전 버전을 주는 경우를 방지합니다. */
+export async function fetchProjectsText(rawUrl: string): Promise<string> {
+  const apiUrl = toGithubApiUrl(rawUrl);
+  if (apiUrl) {
+    try {
+      const res = await fetch(apiUrl, { headers: { "Accept": "application/vnd.github.raw+json", "Cache-Control": "no-cache", "User-Agent": "KJ_FlowForge" } });
+      if (res.ok) {
+        const text = await res.text();
+        if (text && text.trim().length > 0 && text.indexOf("projects") >= 0) return text;
+      }
+    } catch { /* fall through to raw */ }
+  }
+  const separator = rawUrl.includes("?") ? "&" : "?";
+  const response = await fetch(rawUrl + separator + "_flowforge_refresh=" + Date.now(), { headers: { "Cache-Control": "no-cache" } });
   if (!response.ok) throw new Error("HTTP " + response.status);
   return response.text();
+}
+
+export async function defaultFetchText(url: string): Promise<string> {
+  return fetchProjectsText(url);
 }
 
 export async function ensureProjectsCacheDir(dataDirectory: string): Promise<string> {
@@ -194,6 +226,7 @@ export async function buildProjectViews(
   projects: ProjectDefinition[],
   repositories: GitRepositorySetting[],
   resolveRemoteBranches: (url: string) => Promise<string[]> = async () => [],
+  keyId = "",
 ): Promise<ProjectView[]> {
   const seen = new Set<string>();
   const views: ProjectView[] = [];
@@ -201,7 +234,8 @@ export async function buildProjectViews(
     if (seen.has(project.id)) continue;
     seen.add(project.id);
     const repository = repositories.find((repo) => repo.project?.trim() === project.id || sameIdentity(repo.url, project.url)) ?? null;
-    const restricted = allowedBranchesOf(project);
+    // 일반 사용자는 공통 allowedBranches보다 라이선스별 userBranches를 우선합니다.
+    const restricted = keyId ? userBranchesOf(project, keyId) : allowedBranchesOf(project);
     let selectableBranches: string[] = [];
     if (restricted.length > 0) {
       selectableBranches = restricted;

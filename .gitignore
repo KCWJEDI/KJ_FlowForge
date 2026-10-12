@@ -19,7 +19,14 @@ Build/
 Builds/
 UserSettings/
 .txt
-apps/hub/release/win-unpacked/
-apps/hub/release/builder-debug.yml
-apps/hub/release/*.exe
-apps/hub/release/*.nsis.7z
+# 빌드/릴리스 산출물은 커밋하지 않습니다(업데이트 배포는 KJ_FlowForge_Releases 저장소).
+apps/hub/release/
+# 개발 중 생기는 임시/스크래치 산출물
+__*
+_tmp_patch.txt
+# 라이선스 발급 도구는 별도 저장소(KJ_FlowForge_CreateKey)로 분리
+apps/hub/tools/
+# 코드 서명 인증서(개인키)와 로컬 서명 설정은 절대 커밋하지 않습니다.
+apps/hub/config/
+*.pfx
+*.p12

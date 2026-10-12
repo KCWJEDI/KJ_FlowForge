@@ -27,8 +27,8 @@ const EXPECTED_ENV_KEYS = [
   "HUB_DAILY_AUTOMATION_PROJECTS",
   "DISCORD_BOT_TOKEN",
   "DISCORD_CHANNEL_ID",
-  "NOTION_TOKEN",
   "GITHUB_TOKEN",
+  "GIT_SSH_KEY_PATH",
   "GEMINI_API_KEY",
   "GEMINI_MODEL",
 ] as const;
@@ -54,7 +54,7 @@ describe("env store definitions", () => {
     const groups = ENV_DEFINITIONS.filter(
       (definition, index) => index === 0 || definition.group !== ENV_DEFINITIONS[index - 1]?.group,
     ).map((definition) => definition.group);
-expect(groups).toEqual(["Hub", "Automation", "Discord", "Notion", "GitHub", "AI 요약"]);
+    expect(groups).toEqual(["Hub", "Automation", "Discord", "GitHub", "AI 요약"]);
   });
 });
 
@@ -107,7 +107,6 @@ describe("buildEnvTemplate", () => {
     expect(template).toContain("# ----- Hub -----");
     expect(template).toContain("# ----- Automation -----");
     expect(template).toContain("# ----- Discord -----");
-    expect(template).toContain("# ----- Notion -----");
     expect(template).toContain("# ----- GitHub -----");
     for (const definition of ENV_DEFINITIONS) {
       expect(template).toContain(`${definition.key}=`);
@@ -130,7 +129,8 @@ describe("buildEnvTemplate", () => {
         ["GITHUB_TOKEN", 'he said "hi"'],
       ]),
     );
-    expect(template).toContain('HUB_GIT_REPOSITORY="C:\\Projects\\My Game"');
+    // Windows 경로는 JSON 규칙으로 백슬래시가 이스케이프되어 저장됩니다(왕복 시 손상 방지).
+    expect(template).toContain('HUB_GIT_REPOSITORY="C:\\\\Projects\\\\My Game"');
     expect(template).toContain("NOTION_DATABASE_ID=efe8e17c-55ed-823a-a68a-8111ca9334f8");
     expect(template).toContain('GITHUB_TOKEN="he said \\"hi\\""');
   });

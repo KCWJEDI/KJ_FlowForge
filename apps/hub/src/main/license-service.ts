@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { LicenseRole } from "../shared/ipc";
+import type { CredentialBundle, LicenseRole } from "../shared/ipc";
 
 const DEFAULT_MANIFEST_URL =
-  "https://raw.githubusercontent.com/KCWJEDI/KJ_FlowForge_Config/main/licenses.json";
+  // 라이선스 전용 저장소(공개). 라이선스 해시 + 라이선스 키로 암호화된 자격증명만 담깁니다.
+  // 프로젝트 정의(config)는 비공개로 유지하고, 이 공개 저장소에서 자격증명을 먼저 확보합니다.
+  "https://raw.githubusercontent.com/KCWJEDI/KJ_FlowForge_License/main/licenses.json";
 const FETCH_TIMEOUT_MS = 8_000;
 const GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 const VERIFY_INTERVAL_MS = 60 * 60 * 1000;
@@ -16,12 +18,28 @@ interface ManifestEntry {
   owner?: string;
   role?: string;
   expiresAt?: string;
+  products?: string[];
+}
+
+const PRODUCT_ID = "flowforge";
+
+/** `products` 미지정/빈 배열은 레거시 키로 보고 모든 제품에서 허용합니다. */
+function productAllowed(entry: ManifestEntry): boolean {
+  const products = entry.products;
+  if (!Array.isArray(products) || products.length === 0) return true;
+  return products.map((value) => String(value).trim().toLowerCase()).includes(PRODUCT_ID);
 }
 
 interface Manifest {
   version?: number;
   keys: ManifestEntry[];
   revoked?: string[];
+  /**
+  * 라이선스(keyId)별로 암호화된 Git 자격증명(SSH 개인키).
+  * 라이선스 저장소(공개 가능)에 두어, 팀원이 라이선스 키만으로 자기 SSH 키를 받을 수 있게 합니다.
+  * 암호문이므로 저장소가 공개여도 개인키 평문은 노출되지 않습니다.
+  */
+  gitCredentials?: Record<string, CredentialBundle>;
 }
 
 export interface StoredLicense {
@@ -125,6 +143,44 @@ export class LicenseService {
     return this.stored;
   }
 
+  /**
+   * 현재 라이선스 키에 해당하는 암호화된 Git 자격증명을 라이선스 저장소에서 가져옵니다.
+   *
+   * 라이선스 검증과 같은 매니페스트를 사용하므로, 팀원은 라이선스 키만 있으면
+   * (1) 라이선스 확인과 (2) SSH 개인키 수신을 한 번에 처리할 수 있습니다.
+   * config 저장소가 비공개여도 이 경로로 자격증명을 먼저 확보할 수 있습니다.
+   */
+  /**
+   * 현재 라이선스 키에 해당하는 암호화 Git 자격증명 묶음을 라이선스 저장소에서 가져옵니다.
+   *
+   * 라이선스 검증과 같은 매니페스트를 쓰므로, 팀원은 라이선스 키만으로
+   * (1) 라이선스 확인과 (2) 저장소별 SSH 개인키 수신을 한 번에 처리합니다.
+   * config 저장소가 비공개여도 이 경로로 자격증명을 먼저 확보할 수 있습니다.
+   */
+  public async fetchCredentialBundle(): Promise<CredentialBundle | null> {
+    const stored = this.stored;
+    if (!stored) return null;
+    let manifest: Manifest;
+    try {
+      manifest = await this.fetchManifest();
+    } catch {
+      return null;
+    }
+    const bundle = manifest.gitCredentials?.[stored.keyId];
+    if (!bundle || typeof bundle !== "object" || Array.isArray(bundle)) return null;
+    return bundle;
+  }
+
+
+
+  /**
+   * 라이선스 키 원문을 반환합니다(암호화된 Git 자격증명 복호화용).
+   * 메인 프로세스 내부에서만 사용하며 renderer 로 노출하지 않습니다.
+   */
+  public peekKey(): string {
+    return this.stored?.key ?? "";
+  }
+
   public startPeriodicVerification(): void {
     this.stopPeriodicVerification();
     this.verificationTimer = setInterval(() => {
@@ -176,6 +232,7 @@ export class LicenseService {
     const hash = createHash("sha256").update(key).digest("hex");
     const entry = manifest.keys.find((item) => item.key === key || (item.hash && item.hash.toLowerCase() === hash));
     if (!entry) return { status: "invalid" };
+    if (!productAllowed(entry)) return { status: "invalid" };
     if ((manifest.revoked ?? []).includes(entry.id)) return { status: "revoked" };
     if (entry.expiresAt && Date.parse(entry.expiresAt) < Date.now()) return { status: "expired" };
     this.stored = {

@@ -1,8 +1,9 @@
 import { execFile } from "node:child_process";
-import { access, mkdir, open, readFile, readdir, unlink } from "node:fs/promises";
+import { access, mkdir, open, readFile, readdir, rm, unlink } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { GitStatusView } from "../../shared/ipc";
+import { normalizeRepoIdentity } from "../../shared/repo-identity";
 import { classifyPurpose, parseNumstat, parseNameStatus } from "./git-diff";
 
 const execFileAsync = promisify(execFile);
@@ -85,6 +86,53 @@ export interface GitRepositoryIdentity {
 const repositoryQueues = new Map<string, Promise<void>>();
 
 export class GitService {
+  /** 비공개 저장소 clone/fetch/push/ls-remote 에 사용할 GitHub 토큰. 생성 후 주입 가능합니다. */
+  private token = "";
+  /** 배포 키(SSH) 개인키 경로. 설정 시 https 대신 ssh 로 접속합니다. */
+  private sshKeyPath = "";
+
+  public setToken(token: string | undefined): void {
+    this.token = (token ?? "").trim();
+  }
+
+  public get hasToken(): boolean {
+    return this.token.length > 0;
+  }
+
+  /**
+   * 네트워크 Git 명령에 붙일 인증 인자입니다.
+   *
+   * 비공개 저장소는 익명 접근이 불가능하므로(Repository not found / could not read Username),
+   * GitHub 토큰을 Basic 인증 헤더로 전달해야 clone/fetch/push/ls-remote 가 성공합니다.
+   * 자격증명 관리자(credential helper)가 설정된 PC에서는 우연히 성공하지만, 새 PC에서는
+   * 실패하므로 토큰을 명시적으로 넘겨 컴퓨터 간 동작을 일치시킵니다.
+   */
+  private authArgs(): string[] {
+    return githubAuthArgs(this.token);
+  }
+
+  /** 배포 키(SSH 개인키) 경로. HTTPS 토큰이 없어도 저장소에 접근할 수 있게 합니다. */
+  public setSshKey(keyPath: string | undefined): void {
+    this.sshKeyPath = (keyPath ?? "").trim();
+  }
+
+  public get hasSshKey(): boolean {
+    return this.sshKeyPath.length > 0;
+  }
+
+  /** 네트워크 명령에 공통으로 붙는 인증/전송 설정입니다(HTTPS 토큰 + SSH 키). */
+  private networkArgs(): string[] {
+    return [...this.authArgs(), ...sshCommandArgs(this.sshKeyPath)];
+  }
+
+  /** SSH 키가 지정되면 https 원격을 ssh 표기로 바꿔 배포 키로 접속합니다. */
+  private remoteUrl(url: string): string {
+    const trimmed = (url ?? "").trim();
+    // SSH 키가 있으면 https 원격도 ssh 표기로 바꿔 그 키로 접속합니다.
+    // 단, github.com 이 아닌 원격(공유 폴더, 로컬 경로)은 그대로 둡니다.
+    return this.sshKeyPath ? toSshUrl(trimmed) : trimmed;
+  }
+
   public async validateRepository(repository: string): Promise<string> {
     if (isRemoteRepositoryUrl(repository)) {
       throw new Error("GitHub URL이 아니라 PC에 클론된 로컬 Git 저장소 폴더를 선택하세요.");
@@ -113,12 +161,46 @@ export class GitService {
     }
     if (!targetEmpty) throw new Error("대상 폴더가 비어있지 않아 클론할 수 없습니다. 비어있는 새 폴더를 선택하세요.");
     await mkdir(target, { recursive: true });
-    await this.git(process.cwd(), ["clone", remote, target]);
+    await this.git(process.cwd(), [...this.networkArgs(), "clone", this.remoteUrl(remote), target]);
     const root = (await this.git(target, ["rev-parse", "--show-toplevel"])).trim();
     return root || target;
   }
 
   /** 대상 폴더의 상태를 자동 판별해 빈 폴더면 clone, 이미 git 저장소면 연결(connect)합니다. */
+
+  /**
+   * 지정 폴더에 원격 저장소를 보장합니다(없으면 클론, 있으면 fetch 후 갱신).
+   * config 저장소를 읽기 전용으로 캐시할 때 사용합니다.
+   */
+  public async ensureRepositoryAt(url: string, directory: string, branch = "main"): Promise<string> {
+    const target = path.resolve(directory);
+    let hasGit = false;
+    try {
+      await access(path.join(target, ".git"));
+      hasGit = true;
+    } catch { hasGit = false; }
+
+    if (!hasGit) {
+      await mkdir(path.dirname(target), { recursive: true });
+      try {
+        const entries = await readdir(target);
+        // 폴더가 비어 있지 않으면 그대로 클론할 수 없으므로 내용을 정리합니다.
+        if (entries.length > 0) await rm(target, { recursive: true, force: true });
+      } catch { /* 폴더가 없으면 그대로 진행 */ }
+      await this.cloneRepository(url, target);
+      return (await this.git(target, ["rev-parse", "--show-toplevel"])).trim() || target;
+    }
+
+    // 기존 캐시는 원격 최신 내용으로 맞춥니다(실패해도 기존 캐시로 계속).
+    try {
+      await this.withRepositoryLock(target, async () => {
+        await this.git(target, [...this.networkArgs(), "fetch", "--depth", "1", "origin", branch]);
+        await this.git(target, ["checkout", "--force", "FETCH_HEAD"]);
+      });
+    } catch { /* 네트워크 실패 시 기존 캐시 사용 */ }
+    return target;
+  }
+
   public async connectOrClone(url: string, directory: string): Promise<{ action: "clone" | "connect"; root: string; originUrl: string; identity: string }> {
     const target = path.resolve(directory);
     let hasGitDir = false;
@@ -182,6 +264,49 @@ export class GitService {
     await this.withRepositoryLock(root, () => this.git(root, ["add", "--", ...paths]).then(() => undefined));
   }
 
+  /**
+   * 추적 중인 파일의 변경사항을 폐기합니다(작업 트리를 HEAD 상태로 되돌림).
+   *
+   * 안전을 위해 새로 만든(추적되지 않는) 파일은 삭제하지 않습니다.
+   * 새 파일까지 지우려면 cleanUntracked 를 함께 호출해야 합니다.
+   */
+  public async discardChanges(repository: string): Promise<void> {
+    const root = await this.root(repository);
+    await this.withRepositoryLock(root, async () => {
+      // 추적 중인 파일의 수정/삭제를 되돌립니다.
+      await this.git(root, ["checkout", "--", "."]);
+      // 스테이징된 변경도 함께 해제합니다(예: git add 후 폐기).
+      await this.git(root, ["reset", "--mixed", "HEAD"]);
+      // reset 이후 다시 한 번 작업 트리를 맞춥니다.
+      await this.git(root, ["checkout", "--", "."]);
+    });
+  }
+
+  /** 저장소의 미추적(새로 만든) 파일 목록을 반환합니다. */
+  public async listUntrackedFiles(repository: string): Promise<string[]> {
+    const root = await this.root(repository);
+    const output = await this.git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+    return parsePorcelain(output)
+      .filter((file) => file.indexStatus === "?" && file.workTreeStatus === "?")
+      .map((file) => file.path);
+  }
+
+  /**
+   * 미추적 파일을 삭제합니다.
+   *
+   * 사용자가 폐기를 확인했을 때만 호출합니다(새로 만든 작업물이 사라지므로 주의).
+   * 전달받은 경로만 정확히 지우고, 추적 중인 파일은 건드리지 않습니다.
+   */
+  public async cleanUntracked(repository: string, paths: string[]): Promise<void> {
+    const targets = paths.filter((item) => typeof item === "string" && item.trim().length > 0);
+    if (targets.length === 0) return;
+    const root = await this.root(repository);
+    await this.withRepositoryLock(root, async () => {
+      // -f 필수, -d 는 새 폴더까지 정리하되 전달받은 경로로 한정합니다.
+      await this.git(root, ["clean", "-f", "-d", "--", ...targets]);
+    });
+  }
+
   public async commit(repository: string, message: string): Promise<string> {
     if (!message.trim()) throw new Error("Commit message is required");
     const root = await this.root(repository);
@@ -222,8 +347,44 @@ export class GitService {
     validateRef(currentBranch);
     validateRef(remote);
     await this.withRepositoryLock(root, () =>
-      this.git(root, ["push", "--set-upstream", remote, currentBranch]).then(() => undefined),
+      this.git(root, [...this.networkArgs(), "push", "--set-upstream", remote, currentBranch]).then(() => undefined),
     );
+  }
+
+  /**
+   * 원격의 최신 커밋을 현재 브랜치로 가져옵니다(다른 팀원이 병합한 내용 반영).
+   *
+   * 작업 트리가 깨끗하지 않거나 병합이 진행 중이면 시작하지 않습니다(자동 정지).
+   * 이미 로컬 작업이 있는 브랜치를 강제로 덮어쓰지 않고, 커밋되지 않은 변경이 있으면
+   * 사용자가 먼저 커밋/스태시하도록 안내합니다. 이력이 갈라졌으면(diverged) 머지가
+   * 멈출 수 있으므로 fast-forward 를 기본으로 합니다.
+   */
+  public async pull(
+    repository: string,
+    branch: string,
+    remote = "origin",
+  ): Promise<{ oldHead: string | null; newHead: string | null; commits: number }> {
+    validateRef(branch);
+    validateRef(remote);
+    const root = await this.root(repository);
+    return this.withRepositoryLock(root, async () => {
+      const currentBranch = (await this.git(root, ["branch", "--show-current"])).trim();
+      if (currentBranch !== branch) {
+        throw new Error(`브랜치 '${branch}' 가 현재 체크아웃되어 있지 않습니다. 먼저 해당 브랜치로 전환하세요.`);
+      }
+      await this.assertSafeToCommit(root);
+      const oldHead = (await this.git(root, ["rev-parse", "--verify", "HEAD"], true)).trim() || null;
+      // 먼저 원격을 갱신합니다. 그렇지 않으면 오래된 원격 추적 참조를 병합할 수 있습니다.
+      await this.git(root, [...this.networkArgs(), "fetch", remote, branch]);
+      // --ff-only: 로컬 작업을 임의로 머지하지 않습니다. 갈라진 이력은 명확한 오류로 알립니다.
+      await this.git(root, ["merge", "--ff-only", "FETCH_HEAD"]);
+      const newHead = (await this.git(root, ["rev-parse", "--verify", "HEAD"], true)).trim() || null;
+      let commits = 0;
+      if (oldHead && newHead && oldHead !== newHead) {
+        commits = Number.parseInt((await this.git(root, ["rev-list", "--count", `${oldHead}..${newHead}`], true)).trim(), 10) || 0;
+      }
+      return { oldHead, newHead, commits };
+    });
   }
 
   public async listBranches(repository: string): Promise<string[]> {
@@ -236,7 +397,7 @@ export class GitService {
     const remote = url.trim();
     if (!remote) throw new Error("GitHub 저장소 URL을 입력하세요.");
 
-    const output = await this.git(process.cwd(), ["ls-remote", "--heads", remote]);
+    const output = await this.git(process.cwd(), [...this.networkArgs(), "ls-remote", "--heads", this.remoteUrl(remote)]);
     return [...new Set(output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => line.split(/\s+/)[1] ?? "").filter((ref) => ref.startsWith("refs/heads/")).map((ref) => ref.slice("refs/heads/".length)))];
   }
 
@@ -363,7 +524,7 @@ export class GitService {
         committed = true;
       }
       const newHead = (await this.git(worktreePath, ["rev-parse", "HEAD"])).trim();
-      await this.git(worktreePath, ["push", "--set-upstream", "origin", `${newHead}:refs/heads/${branch}`]);
+      await this.git(worktreePath, [...this.networkArgs(), "push", "--set-upstream", "origin", `${newHead}:refs/heads/${branch}`]);
       const commits = oldHead && newHead ? await this.listCommitsBetween(root, oldHead, newHead) : [];
       return {
         repository: root,
@@ -508,7 +669,7 @@ export class GitService {
     } catch (error) {
       if (allowFailure) return "";
       const detail = error as { stderr?: string; message?: string };
-      throw new Error(detail.stderr?.trim() || detail.message || `git ${args[0]} failed`);
+      throw new Error(friendlyGitError(detail.stderr?.trim() || detail.message || `git ${args[0]} failed`));
     }
   }
 }
@@ -553,19 +714,67 @@ function normalizeIdentityPath(value: string): string {
   return process.platform === "win32" ? value.toLowerCase() : value;
 }
 
+/**
+ * GitHub 토큰을 git 명령 인자로 변환합니다(순수 함수).
+ * Authorization 헤더는 github.com 호스트에만 적용되므로 다른 호스트로 토큰이 새지 않습니다.
+ */
+export function githubAuthArgs(token: string): string[] {
+  const trimmed = (token ?? "").trim();
+  if (!trimmed) return [];
+  const basic = Buffer.from(`x-access-token:${trimmed}`, "utf8").toString("base64");
+  return ["-c", `http.https://github.com/.extraHeader=Authorization: Basic ${basic}`];
+}
+
+/**
+ * SSH 개인키(배포 키)를 사용하도록 git 에 전달할 인자입니다(순수 함수).
+ *
+ * 지정된 키만 사용하도록 IdentitiesOnly 를 켜서, PC 에 다른 키가 있어도 섞이지 않게 합니다.
+ * 대화형 프롬프트를 막아 무인 실행(앱)에서 멈추지 않도록 합니다.
+ */
+export function sshCommandArgs(keyPath: string): string[] {
+  const trimmed = (keyPath ?? "").trim();
+  if (!trimmed) return [];
+  const normalized = trimmed.replace(/\\/g, "/");
+  const command = `ssh -i "${normalized}" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new`;
+  return ["-c", `core.sshCommand=${command}`];
+}
+
+/**
+ * https 원격 URL 을 ssh 표기로 변환합니다(순수 함수).
+ * 이미 ssh/scp 표기이거나 github.com 이 아니면 원본을 그대로 돌려줍니다.
+ */
+export function toSshUrl(url: string): string {
+  const trimmed = (url ?? "").trim();
+  if (!trimmed) return trimmed;
+  if (/^(?:git@|ssh:\/\/)/i.test(trimmed)) return trimmed;
+  const match = /^https?:\/\/(?:[^@/]+@)?github\.com\/([^/]+)\/(.+?)(?:\.git)?\/?$/i.exec(trimmed);
+  if (!match) return trimmed;
+  return `git@github.com:${match[1]}/${match[2]}.git`;
+}
+
+/**
+ * git 실패 메시지를 사용자가 이해할 수 있게 다듬습니다.
+ *
+ * 비공개 저장소를 인증 없이 접근하면 GitHub 는 저장소가 없는 것처럼 "Repository not found" 를
+ * 돌려줍니다. 이는 오해를 부르므로 인증/권한 안내로 바꿔줍니다.
+ */
+export function friendlyGitError(stderr: string): string {
+  const text = (stderr ?? "").trim();
+  if (!text) return text;
+  const authIssue = /repository not found|could not read username|authentication failed|could not read password|terminal prompts disabled|invalid username or password|403 forbidden|support for password authentication/i.test(text);
+  if (authIssue) {
+    return (
+      "원격 저장소에 접근할 수 없습니다. 비공개 저장소는 인증이 필요합니다.\n" +
+      "설정 → Git 접속 에서 GitHub 토큰(repo 권한)을 등록한 뒤 다시 시도하세요.\n\n" +
+      "원본 오류: " + text
+    );
+  }
+  return text;
+}
+
 export function normalizeRemoteIdentity(value: string): string {
-  const trimmed = value.trim().replace(/\\/g, "/");
-  const scp = /^(?:[^@/]+@)?([^:/]+):(.+)$/.exec(trimmed);
-  if (scp && !/^[A-Za-z]:\//.test(trimmed) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
-    return `${scp[1]!.toLowerCase()}/${scp[2]!.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "")}`;
-  }
-  try {
-    const url = new URL(trimmed);
-    const authority = `${url.hostname.toLowerCase()}${url.port ? `:${url.port}` : ""}`;
-    return `${authority}/${url.pathname.replace(/^\/+|\/+$/g, "").replace(/\.git$/i, "")}`;
-  } catch {
-    return trimmed.replace(/\.git$/i, "");
-  }
+  // 원격 URL 정규화는 shared/repo-identity 의 단일 구현만 사용합니다.
+  return normalizeRepoIdentity(value);
 }
 
 function parsePorcelain(output: string): GitStatusView["files"] {

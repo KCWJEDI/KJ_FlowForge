@@ -118,4 +118,11 @@ describe("projects store", () => {
     expect(hasUserBranchAssignment(project, "other")).toBe(false);
     expect(hasUserBranchAssignment({ ...project, userBranches: { key: [] } }, "key")).toBe(false);
   });
+
+  it("uses per-key branches when building a licensed user's project view", async () => {
+    const projects = [{ id: "p", name: "Project", url: "https://example.test/p.git", userBranches: { user1: ["feature/a"] } }];
+    const views = await buildProjectViews(projects, [], async () => ["main", "feature/a"], "user1");
+    expect(views[0]?.selectableBranches).toEqual(["feature/a"]);
+    expect(views[0]?.branchRestricted).toBe(true);
+  });
 });

@@ -10,7 +10,24 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body class="license-body">
+    <div class="license-titlebar">
+      <button id="license-close" class="window-close" type="button" aria-label="닫기" title="닫기">&#x2715;</button>
+    </div>
     <div class="license-card">
+      <span class="license-logo" aria-hidden="true">
+        <svg viewBox="0 0 40 40" role="img">
+          <defs>
+            <linearGradient id="kjLicenseGradient" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#8fb0ff" />
+              <stop offset="1" stop-color="#5b63ff" />
+            </linearGradient>
+          </defs>
+          <rect x="3" y="3" width="34" height="34" rx="11" fill="url(#kjLicenseGradient)" />
+          <path d="M13 12.5v15" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" />
+          <path d="M14.6 20.2l7.6-7.4M14.6 20.2l7.6 7.4" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" fill="none" />
+          <circle cx="28.4" cy="20" r="2.3" fill="#ffffff" />
+        </svg>
+      </span>
       <h1>라이선스 인증</h1>
       <p id="license-message" class="muted"></p>
       <label>

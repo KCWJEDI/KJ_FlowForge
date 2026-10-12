@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LicenseService } from "../src/main/license-service";
+import { removeDirSafely } from "./helpers/cleanup";
 
 const KEY = "KJFF-TEST-KEY-0001";
 const manifest = (role = "admin", extra = {}) => ({
@@ -16,7 +17,7 @@ describe("LicenseService role authority", () => {
 
   afterEach(async () => {
     vi.unstubAllGlobals();
-    if (directory) await rm(directory, { recursive: true, force: true });
+    if (directory) await removeDirSafely(directory);
     directory = "";
   });
 
@@ -44,5 +45,28 @@ describe("LicenseService role authority", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ ...manifest("user"), revoked: ["test-id"] }), { status: 200 })));
     await expect(service.check(KEY)).resolves.toEqual({ status: "revoked" });
+  });
+
+  it("rejects keys scoped to another product but allows legacy keys", async () => {
+    directory = await mkdtemp(path.join(tmpdir(), "kj-license-"));
+    const service = new LicenseService(directory, { manifestUrl: "https://example.test/licenses.json" });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ version: 1, keys: [{ id: "wai", key: KEY, owner: "tester", products: ["whisperai"] }], revoked: [] }),
+      { status: 200 },
+    )));
+    await expect(service.check(KEY)).resolves.toEqual({ status: "invalid" });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ version: 1, keys: [{ id: "legacy", key: KEY, owner: "tester" }], revoked: [] }),
+      { status: 200 },
+    )));
+    await expect(service.check(KEY)).resolves.toMatchObject({ status: "ok", keyId: "legacy" });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ version: 1, keys: [{ id: "both", key: KEY, owner: "tester", products: ["flowforge", "whisperai"] }], revoked: [] }),
+      { status: 200 },
+    )));
+    await expect(service.check(KEY)).resolves.toMatchObject({ status: "ok", keyId: "both" });
   });
 });

@@ -183,6 +183,22 @@ body {
   margin: 0;
 }
 
+/* Git 카드 상단의 현재 브랜치 표시: 제목과 새로고침 버튼 사이에서 버튼 왼쪽에 붙습니다. */
+.git-current-branch {
+  margin-left: auto;
+  margin-right: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+}
+
+.git-current-branch:empty {
+  display: none;
+}
+
 .stack {
   display: flex;
   flex-direction: column;
@@ -194,6 +210,29 @@ body {
   gap: 8px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+/* 각 Git 카드 안에서 그 패널 전용 저장소 폴더를 고르는 영역입니다. */
+.card-connect {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.card-connect span {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 카드 상단의 현재 저장소 경로 표시(드롭다운 대신 단일 경로). */
+.git-repository-path {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 label {
@@ -567,6 +606,19 @@ body.theme-light .pending-branch .commits {
   white-space: nowrap;
   font-size: 12px;
   font-weight: 600;
+}
+
+/* 카드 헤더에는 프로젝트 이름만 크게(기본 12px의 약 3배) 표시한다.
+   사용자/분야 라벨/로컬 경로는 title 툴팁으로 확인한다. */
+.repo-summary.project-title {
+  font-size: 24px;
+  line-height: 1.15;
+  font-weight: 700;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  /* 제목을 눌러도 세부 내용이 열리고 닫히므로 클릭 가능함을 표시합니다. */
+  cursor: pointer;
+  user-select: none;
 }
 
 .repository-card.collapsed > *:not(.repository-card-head) {
@@ -1095,6 +1147,29 @@ body.theme-light .pending-branch .commits {
   background: var(--panel, #171b2e);
 }
 
+.license-logo {
+  width: 56px;
+  height: 56px;
+  align-self: center;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 12px 26px rgba(91, 109, 255, 0.42);
+}
+
+.license-logo svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.license-body {
+  background: radial-gradient(900px 520px at 80% -12%, rgba(91, 109, 255, 0.2), transparent 62%), var(--bg, #0b0e19);
+}
+
+.license-card h1 {
+  text-align: center;
+}
+
 .license-card h1 {
   font-size: 20px;
   margin: 0;
@@ -1119,4 +1194,607 @@ body.theme-light .pending-branch .commits {
   display: flex;
   gap: 8px;
 }
+
+/* =====================================================================
+   KJ FlowForge — UI refresh
+   앱 셸(사이드바 + 콘텐츠) 구조와 현대적인 시각 언어를 정의합니다.
+   위쪽의 기존 규칙을 덮어써서 실제 프로그램 같은 화면을 만듭니다.
+   ===================================================================== */
+:root {
+  --bg: #0b0e19;
+  --bg-elev: #0f1322;
+  --panel: #141a2b;
+  --panel-2: #1a2135;
+  --panel-3: #222b45;
+  --border: #26304a;
+  --border-strong: #35415f;
+  --text: #eef1fb;
+  --muted: #9aa4c6;
+  --accent: #7c9bff;
+  --accent-2: #5b6dff;
+  --accent-soft: rgba(91, 109, 255, 0.16);
+  --ok: #3ad29a;
+  --warn: #f5c453;
+  --err: #ff7183;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --shadow-1: 0 14px 34px rgba(3, 6, 18, 0.48);
+  --shadow-2: 0 2px 10px rgba(3, 6, 18, 0.34);
+  --font-ui: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+}
+
+body.theme-light {
+  --bg: #eef1f8;
+  --bg-elev: #ffffff;
+  --panel: #ffffff;
+  --panel-2: #f2f5fb;
+  --panel-3: #e7ecf6;
+  --border: #d5dce8;
+  --border-strong: #bcc6d8;
+  --text: #17202f;
+  --muted: #5b6577;
+  --accent: #3f6fe0;
+  --accent-2: #2f5bd0;
+  --accent-soft: rgba(63, 111, 224, 0.14);
+  --ok: #12855c;
+  --warn: #9a6800;
+  --err: #c8394a;
+  --shadow-1: 0 14px 30px rgba(30, 45, 80, 0.12);
+  --shadow-2: 0 2px 8px rgba(30, 45, 80, 0.08);
+}
+
+body {
+  font-family: var(--font-ui);
+  background: radial-gradient(1200px 620px at 82% -8%, rgba(91, 109, 255, 0.16), transparent 60%),
+    radial-gradient(900px 520px at -6% 108%, rgba(124, 155, 255, 0.12), transparent 62%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+body.theme-light {
+  background: radial-gradient(1100px 560px at 84% -10%, rgba(63, 111, 224, 0.12), transparent 60%),
+    radial-gradient(880px 520px at -8% 110%, rgba(63, 111, 224, 0.08), transparent 62%),
+    var(--bg);
+}
+
+/* ----- App shell ----- */
+.app-shell {
+  display: flex;
+  flex: 1;
+  min-height: 100%;
+}
+
+.sidebar {
+  width: 250px;
+  flex: 0 0 250px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 22px 16px 18px;
+  background: linear-gradient(180deg, var(--panel) 0%, var(--bg-elev) 100%);
+  border-right: 1px solid var(--border);
+}
+
+.sidebar .brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-mark {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border-radius: 13px;
+  overflow: hidden;
+  box-shadow: 0 10px 22px rgba(91, 109, 255, 0.42);
+}
+
+.brand-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.brand-text strong {
+  font-size: 15px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+.brand-text small {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar .tab-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.sidebar .tab {
+  width: 100%;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.sidebar .tab:hover {
+  background: var(--panel-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.sidebar .tab.active {
+  background: var(--accent-soft);
+  color: #ffffff;
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.sidebar-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sidebar-foot .integration-dots {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+}
+
+.dot {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 11px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sidebar .theme-toggle {
+  width: 100%;
+  margin: 0;
+  padding: 9px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: none;
+}
+
+/* ----- 자동 업데이트 ----- */
+
+.update-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.update-indicator .update-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+
+.update-indicator[data-phase="downloaded"] .update-dot { background: var(--ok); }
+.update-indicator[data-phase="available"] .update-dot,
+.update-indicator[data-phase="downloading"] .update-dot,
+.update-indicator[data-phase="checking"] .update-dot { background: var(--accent); }
+.update-indicator[data-phase="error"] .update-dot { background: #e5484d; }
+
+.update-indicator-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.update-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.update-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.update-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.update-progress-bar {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.update-notes-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.update-notes {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.status-pill.on {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.status-pill.error {
+  color: #e5484d;
+  border-color: #e5484d;
+}
+
+
+.content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 30px;
+  background: transparent;
+  border-bottom: 1px solid var(--border);
+}
+
+.page-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.page-eyebrow {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+}
+
+.page-heading h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+/* 헤더 새로고침 버튼: 처리 중에는 흐려지고 클릭이 막힙니다. */
+#refresh-state.is-busy,
+#refresh-state:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.main-area {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.layout {
+  padding: 24px 30px 34px;
+  gap: 18px;
+}
+
+/* ----- Cards ----- */
+.card {
+  background: linear-gradient(180deg, var(--panel) 0%, var(--bg-elev) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  box-shadow: var(--shadow-2);
+}
+
+.card h2 {
+  font-size: 15px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+}
+
+.card h3 {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.card-head {
+  margin-bottom: 16px;
+}
+
+.repository-card,
+.connection,
+.status-card,
+.pending-branch {
+  background: var(--panel-2);
+  border-radius: var(--radius-sm);
+}
+
+/* ----- Controls ----- */
+button {
+  background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
+  border-radius: var(--radius-sm);
+  padding: 9px 16px;
+  font-weight: 600;
+  box-shadow: 0 6px 16px rgba(91, 109, 255, 0.28);
+  transition: transform 0.12s ease, filter 0.12s ease, border-color 0.12s ease;
+}
+
+button:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+button.ghost {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  box-shadow: none;
+}
+
+button.ghost:hover {
+  background: var(--panel-3);
+  border-color: var(--border-strong);
+}
+
+button.ghost.danger {
+  color: var(--err);
+  border-color: color-mix(in srgb, var(--err) 55%, transparent);
+}
+
+button.push-button {
+  background: linear-gradient(180deg, #ffd073 0%, #f5b53a 100%);
+  border: 1px solid #e5a72e;
+  color: #4a3200;
+}
+
+input,
+select,
+textarea {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+input[type="checkbox"] {
+  accent-color: var(--accent-2);
+}
+
+.tab-bar.sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  margin-bottom: 16px;
+}
+
+.tab-bar.sub .tab {
+  border-radius: 999px;
+  padding: 8px 15px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 12.5px;
+}
+
+.tab-bar.sub .tab:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.tab-bar.sub .tab.active {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+  color: #ffffff;
+}
+
+.table th {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
+
+.table td,
+.table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.table tbody tr:hover {
+  background: var(--panel-2);
+}
+
+.status-bar {
+  padding: 11px 30px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.dashboard-add-card {
+  background: color-mix(in srgb, var(--panel-2) 60%, transparent);
+  border-radius: var(--radius);
+}
+
+.dashboard-git-grid .card.neon {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 22px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* =====================================================================
+   라이선스 인증 창 (frameless) 전용 규칙
+   OS 타이틀바 대신 자체 X 버튼을 쓰고, 내용이 잘리거나
+   스크롤바가 생기지 않도록 높이를 고정합니다.
+   ===================================================================== */
+.license-body {
+  min-height: 100vh;
+  padding: 44px 28px 28px;
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(900px 520px at 80% -12%, rgba(91, 109, 255, 0.2), transparent 62%), var(--bg, #0b0e19);
+}
+
+.license-titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 8px;
+  z-index: 10;
+  -webkit-app-region: drag;
+}
+
+.license-titlebar .window-close {
+  -webkit-app-region: no-drag;
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted, #9aa4c6);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.license-titlebar .window-close:hover {
+  background: #e5484d;
+  color: #ffffff;
+  filter: none;
+}
+
+.license-card {
+  width: min(420px, 92vw);
+  padding: 26px 28px;
+  border-radius: 14px;
+  box-shadow: var(--shadow-1, 0 14px 34px rgba(3, 6, 18, 0.48));
+}
+
+/* 메시지/경고는 항상 두 줄 높이를 미리 확보해, 경고가 뜨거나
+   문장이 길어져도 창 높이가 커지거나 스크롤바가 생기지 않게 합니다. */
+.license-card #license-message,
+.license-card #license-error {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.license-card #license-message {
+  min-height: 34px;
+}
+
+/* 경고/오류 문구가 2~3줄이 되어도 아래 버튼과 겹치지 않도록
+   항상 세 줄 높이를 미리 확보합니다. */
+.license-card #license-error {
+  min-height: 50px;
+}
+
+.license-card input {
+  min-height: 38px;
+}
+
+.license-card .row button {
+  min-height: 38px;
+}
+
 

@@ -31,6 +31,8 @@ export interface GitCardSelection {
   path: string;
   workBranches: string[];
   activeBranches: string[];
+  /** 이 카드(패널)에서 "저장소 폴더 선택"으로 직접 지정한 로컬 Git 폴더. */
+  localPath?: string;
 }
 
 export interface GitSelectionState {
@@ -148,6 +150,18 @@ export interface GitChangeSummary {
   deletions: number;
 }
 
+export interface GitPullResult {
+  repository: string;
+  branch: string;
+  /** 원격에서 새 커밋을 가져와 HEAD가 전진했으면 true. */
+  updated: boolean;
+  oldHead: string | null;
+  newHead: string | null;
+  /** 이번에 가져온 커밋 수. */
+  commits: number;
+  status: GitStatusView;
+}
+
 export interface GitRepositorySetting {
   project?: string;
   label: string;
@@ -160,6 +174,7 @@ export interface GitRepositorySetting {
   discordBranches?: string[];
   notionDatabaseId?: string;
   discordChannelId?: string;
+  notionToken?: string;
 }
 
 export interface ProjectDefinition {
@@ -175,6 +190,25 @@ export interface ProjectDefinition {
   gitRepo?: string;
 }
 
+/** 관리자가 라이선스 키로 암호화해 배포하는 Git 자격증명 봉투입니다. */
+export interface EncryptedCredentialEnvelope {
+  v: number;
+  alg: string;
+  iter: number;
+  salt: string;
+  iv: string;
+  ct: string;
+  mac: string;
+}
+
+/**
+ * 저장소 식별자(normalizeRepoIdentity 결과)별로 암호화된 자격증명 묶음입니다.
+ *
+ * 라이선스 저장소에 저장되어, 팀원이 라이선스 키만으로 자기 SSH 키를 받아
+ * 비공개 config/프로젝트 저장소에 접근할 수 있게 합니다(닭-달걀 해소).
+ * 암호문이므로 라이선스 저장소가 공개여도 개인키 평문은 노출되지 않습니다.
+ */
+export type CredentialBundle = Record<string, EncryptedCredentialEnvelope>;
 export interface ProjectView {
   id: string;
   name: string;
@@ -244,6 +278,37 @@ export interface LicenseStatus {
   reason?: "missing" | "grace-offline" | "invalid" | "blocked" | undefined;
 }
 
+export type UpdatePhase =
+  | "disabled"
+  | "idle"
+  | "checking"
+  | "available"
+  | "downloading"
+  | "downloaded"
+  | "not-available"
+  | "error";
+
+export interface UpdateProgress {
+  percent: number;
+  transferred: number;
+  total: number;
+  bytesPerSecond: number;
+}
+
+export interface UpdateStatus {
+  phase: UpdatePhase;
+  currentVersion: string;
+  latestVersion?: string;
+  releaseNotes?: string;
+  releaseDate?: string;
+  message: string;
+  /** 오류 원문(진단용). renderer에는 상세 영역에만 표시합니다. */
+  detail?: string;
+  progress?: UpdateProgress;
+  checkedAt?: string;
+  manualDownloadUrl: string;
+}
+
 export interface DashboardState {
   startedAt: string;
   config: PublicConfig;
@@ -256,12 +321,22 @@ export interface HubApi {
   getState(): Promise<DashboardState>;
   inspectGit(repository?: string): Promise<GitStatusView>;
   listGitBranches(repository?: string): Promise<string[]>;
+  /** 연결된 폴더의 변경 감시를 시작합니다(자동 새로고침용). */
+  watchRepository(directory: string): Promise<boolean>;
+  /** 연결된 폴더의 변경 감시를 중단합니다. */
+  unwatchRepository(directory: string): Promise<boolean>;
   switchGitBranch(args: { repository?: string; branch: string }): Promise<GitStatusView>;
   gitCreateBranch(args: { repository?: string; branch: string; startPoint?: string }): Promise<GitStatusView>;
   gitStage(args: { repository?: string; paths: string[] }): Promise<GitStatusView>;
+  /** 폐기 대상 미리보기: 바뀐 파일 수와 새로 만든 파일 목록. */
+  gitDiscardPreview(repository?: string): Promise<{ changedFiles: number; untrackedFiles: string[] }>;
+  /** 변경사항을 폐기합니다(includeUntracked 시 새 파일도 삭제). */
+  gitDiscard(args: { repository?: string; includeUntracked?: boolean }): Promise<GitStatusView>;
   gitCommit(args: { repository?: string }): Promise<GitChangeSummary>;
   gitPush(args: { repository?: string }): Promise<GitStatusView>;
   gitPushBranch(args: { repository?: string; branch: string; remote?: string }): Promise<GitStatusView>;
+  /** 선택한 브랜치로 원격(main 등)의 최신 커밋을 가져옵니다(Pull). */
+  gitPull(args: { repository?: string; branch: string; remote?: string }): Promise<GitPullResult>;
   getProjects(): Promise<ProjectView[]>;
   cloneGitRepository(args: { url: string; directory: string }): Promise<GitCloneResult>;
   connectGitRepository(args: { directory: string }): Promise<GitConnectResult>;
@@ -276,12 +351,22 @@ export interface HubApi {
   getGitSelection(): Promise<GitSelectionState>;
   saveGitSelection(state: GitSelectionState): Promise<GitSelectionState>;
   testIntegrations(): Promise<IntegrationConnectionStatus[]>;
-  testNotionDatabase(args: { repository?: string; databaseId: string }): Promise<{ ok: boolean; message: string }>;
+  testNotionDatabase(args: { repository?: string; databaseId: string; token?: string }): Promise<{ ok: boolean; message: string }>;
   testDiscordChannel(args: { repository?: string; channelId: string }): Promise<{ ok: boolean; message: string }>;
   /** 앱 시작/설정 변경 시 저장소별 Notion DB·Discord 채널 연결 상태를 배치로 확인합니다. */
   checkRepositoryConnections(): Promise<RepositoryConnectionCheck[]>;
   getLicenseStatus(): Promise<LicenseStatus>;
   activateLicense(key: string): Promise<LicenseStatus>;
   replaceLicense(key: string): Promise<LicenseStatus>;
+  /** 현재 앱 버전과 자동 업데이트 상태를 가져옵니다. */
+  getUpdateStatus(): Promise<UpdateStatus>;
+  /** 자동 업데이트를 지금 확인합니다. */
+  checkForUpdates(): Promise<UpdateStatus>;
+  /** 내려받은 업데이트를 설치하고 앱을 다시 시작합니다. */
+  installUpdate(): Promise<boolean>;
+  /** 업데이트 상태 변경 구독(확인/다운로드/완료/오류). */
+  onUpdateStatus(listener: (status: UpdateStatus) => void): () => void;
   onStateChanged(listener: (state: DashboardState) => void): () => void;
+  /** 연결된 폴더가 변경되면 호출됩니다. */
+  onRepositoryChanged(listener: (repository: string) => void): () => void;
 }

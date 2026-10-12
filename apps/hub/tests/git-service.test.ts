@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { GitService } from "../src/main/git/git-service";
+import { removeDirSafely } from "./helpers/cleanup";
 
 const exec = promisify(execFile);
 
@@ -12,7 +13,7 @@ describe("GitService read-only daily capture", () => {
   let directory: string | null = null;
 
   afterEach(async () => {
-    if (directory) await rm(directory, { recursive: true, force: true });
+    if (directory) await removeDirSafely(directory);
     directory = null;
   });
 
@@ -110,7 +111,7 @@ async function git(cwd: string, args: string[]): Promise<string> {
 describe("GitService cloneRepository", () => {
   let directory: string | null = null;
   afterEach(async () => {
-    if (directory) await rm(directory, { recursive: true, force: true });
+    if (directory) await removeDirSafely(directory);
     directory = null;
   });
 
@@ -148,5 +149,79 @@ describe("GitService cloneRepository", () => {
 
   it("rejects a local path that is not a remote-style URL", async () => {
     await expect(new GitService().cloneRepository("", path.join(directory ?? tmpdir(), "x"))).rejects.toThrow("올바른 Git 저장소 URL");
+  });
+});
+
+describe("GitService pull", () => {
+  let directory: string | null = null;
+  afterEach(async () => {
+    if (directory) await removeDirSafely(directory);
+    directory = null;
+  });
+
+  /** 원격(bare) + 클론을 준비하고 브랜치/경로들을 돌려줍니다. */
+  async function setUpRemote(): Promise<{ origin: string; clone: string; branch: string }> {
+    directory = await mkdtemp(path.join(tmpdir(), "hub-git-pull-"));
+    const source = path.join(directory, "source");
+    await git(directory, ["init", source]);
+    await git(source, ["config", "user.name", "FlowForge Test"]);
+    await git(source, ["config", "user.email", "flowforge@example.com"]);
+    await writeFile(path.join(source, "README.md"), "initial\n", "utf8");
+    await git(source, ["add", "README.md"]);
+    await git(source, ["commit", "-m", "initial"]);
+    const branch = (await git(source, ["branch", "--show-current"])).trim();
+    const origin = path.join(directory, "origin.git");
+    await git(directory, ["init", "--bare", origin]);
+    await git(source, ["remote", "add", "origin", origin]);
+    await git(source, ["push", "origin", branch]);
+    const clone = path.join(directory, "clone");
+    await git(directory, ["clone", origin, clone]);
+    await git(clone, ["config", "user.name", "FlowForge Test"]);
+    await git(clone, ["config", "user.email", "flowforge@example.com"]);
+    return { origin, clone, branch };
+  }
+
+  it("fast-forwards the current branch to the latest remote commit", async () => {
+    const { clone, branch } = await setUpRemote();
+    const remote = path.join(directory!, "source");
+    await writeFile(path.join(remote, "feature.txt"), "merged by teammate\n", "utf8");
+    await git(remote, ["add", "feature.txt"]);
+    await git(remote, ["commit", "-m", "teammate merge"]);
+    await git(remote, ["push", "origin", branch]);
+
+    const result = await new GitService().pull(clone, branch);
+
+    expect(result.oldHead).not.toBe(result.newHead);
+    expect(result.commits).toBe(1);
+    expect(await readFile(path.join(clone, "feature.txt"), "utf8")).toContain("merged by teammate");
+  });
+
+  it("reports no change when already up to date", async () => {
+    const { clone, branch } = await setUpRemote();
+    const result = await new GitService().pull(clone, branch);
+    expect(result.oldHead).toBe(result.newHead);
+    expect(result.commits).toBe(0);
+  });
+
+  it("refuses to run when the requested branch is not checked out", async () => {
+    const { clone } = await setUpRemote();
+    await git(clone, ["branch", "other"]);
+    await expect(new GitService().pull(clone, "other")).rejects.toThrow("체크아웃되어 있지 않습니다");
+  });
+
+  it("refuses to merge diverged history without an explicit merge", async () => {
+    const { clone, branch } = await setUpRemote();
+    // 로컬에만 있는 커밋을 만들어 이력을 갈라지게 합니다.
+    await writeFile(path.join(clone, "local.txt"), "local only\n", "utf8");
+    await git(clone, ["add", "local.txt"]);
+    await git(clone, ["commit", "-m", "local work"]);
+    // 원격에도 별도 커밋을 추가합니다.
+    const remote = path.join(directory!, "source");
+    await writeFile(path.join(remote, "remote.txt"), "remote only\n", "utf8");
+    await git(remote, ["add", "remote.txt"]);
+    await git(remote, ["commit", "-m", "remote work"]);
+    await git(remote, ["push", "origin", branch]);
+
+    await expect(new GitService().pull(clone, branch)).rejects.toThrow(/fast-forward/i);
   });
 });

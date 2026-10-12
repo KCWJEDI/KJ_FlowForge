@@ -10,21 +10,54 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <header class="app-header">
-     <div class="brand">
-       <h1>KJ FlowForge</h1>
-       <span id="header-meta" class="muted"></span>
-        <button id="refresh-state" class="ghost" type="button">새로고침</button>
-     </div>
-     <div id="integration-dots" class="integration-dots" title="Integration availability"></div>
-     <button id="theme-toggle" class="ghost theme-toggle" type="button" aria-label="테마 전환">라이트 모드</button>
-    </header>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 40 40" role="img">
+              <defs>
+                <linearGradient id="kjBrandGradient" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#8fb0ff" />
+                  <stop offset="1" stop-color="#5b63ff" />
+                </linearGradient>
+              </defs>
+              <rect x="3" y="3" width="34" height="34" rx="11" fill="url(#kjBrandGradient)" />
+              <path d="M13 12.5v15" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" />
+              <path d="M14.6 20.2l7.6-7.4M14.6 20.2l7.6 7.4" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" fill="none" />
+              <circle cx="28.4" cy="20" r="2.3" fill="#ffffff" />
+            </svg>
+          </span>
+          <span class="brand-text">
+            <strong>KJ FlowForge</strong>
+            <small id="header-meta" class="muted"></small>
+          </span>
+        </div>
 
-    <nav class="tab-bar" id="main-tabs" aria-label="Main tabs">
-      <button id="tab-dashboard" class="tab active" type="button" data-panel="dashboard">대시보드</button>
-      <button id="tab-automation" class="tab" type="button" data-panel="automation">08시 일일 작업등록</button>
-      <button id="tab-settings" class="tab" type="button" data-panel="settings">설정</button>
-    </nav>
+        <nav class="tab-bar" id="main-tabs" aria-label="Main tabs">
+          <button id="tab-dashboard" class="tab active" type="button" data-panel="dashboard">대시보드</button>
+          <button id="tab-automation" class="tab" type="button" data-panel="automation">08시 일일 작업등록</button>
+          <button id="tab-settings" class="tab" type="button" data-panel="settings">설정</button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div id="integration-dots" class="integration-dots" title="Integration availability"></div>
+          <button id="update-indicator" class="update-indicator" type="button" title="업데이트 상태">
+            <span class="update-dot" aria-hidden="true"></span>
+            <span id="update-indicator-text" class="update-indicator-text">v-</span>
+          </button>
+          <button id="theme-toggle" class="theme-toggle" type="button" aria-label="테마 전환">라이트 모드</button>
+        </div>
+      </aside>
+
+      <div class="content">
+        <header class="app-header">
+          <div class="page-heading">
+            <span class="page-eyebrow">WORKSPACE</span>
+            <h2 id="page-title">대시보드</h2>
+          </div>
+          <button id="refresh-state" class="ghost" type="button">새로고침</button>
+        </header>
+        <main class="main-area">
 
     <section id="panel-dashboard" class="layout">
       <div class="project-filter">
@@ -32,24 +65,22 @@
         <input id="dashboard-project-rename-input" type="text" placeholder="새 프로젝트 이름" value="" />
         <button id="dashboard-project-rename" class="ghost" type="button">프로젝트 이름 변경</button>
       </div>
-       <div class="project-connect" id="project-connect">
-         <label>로컬 폴더 연결</label>
-         <div class="row">
-           <button id="project-connect-choose" class="ghost" type="button">폴더 선택</button>
-           <span id="project-connect-message" class="muted" role="status"></span>
-         </div>
-       </div>
       <section id="dashboard-git-grid" class="grid dashboard-git-grid">
         <div class="card">
           <div class="card-head">
             <h2>Git 커밋 / 푸시</h2>
+            <span id="git-current-branch" class="git-current-branch" title="현재 연결된 브랜치"></span>
             <button id="git-refresh" class="ghost" type="button">새로고침</button>
           </div>
           <div class="stack">
             <label>
               저장소
-              <select id="git-repository"></select>
+              <span id="git-repository-path" class="git-repository-path"></span>
             </label>
+            <div class="card-connect" id="git-connect">
+              <button id="git-connect-choose" class="ghost" type="button">저장소 폴더 선택</button>
+              <span id="git-connect-message" class="muted" role="status"></span>
+            </div>
             <div>
               <div class="setting-label">작업 브랜치</div>
               <div id="git-branches" class="git-branch-picker"></div>
@@ -70,6 +101,8 @@
             <div class="row">
               <button id="git-commit" type="button">변경사항 요약 후 커밋</button>
               <button id="git-push" class="ghost push-button" type="button">푸시</button>
+              <button id="git-pull" class="ghost" type="button" title="원격(main 등)의 최신 커밋을 현재 브랜치로 가져옵니다">Pull (원격 변경 가져오기)</button>
+              <button id="git-discard" class="ghost danger" type="button" title="현재 브랜치의 변경사항을 되돌려 다른 브랜치로 이동할 수 있게 합니다">변경사항 폐기</button>
               <button id="git-daily-report" class="ghost" type="button">일일 요약 등록</button>
             </div>
             <span id="git-error" class="error-text" role="alert"></span>
@@ -119,7 +152,9 @@
           <button id="settings-tab-notion" class="tab" type="button" data-settings-panel="notion">Notion 저장소</button>
           <button id="settings-tab-discord" class="tab" type="button" data-settings-panel="discord">Discord 채널</button>
           <button id="settings-tab-license" class="tab" type="button" data-settings-panel="license">라이선스</button>
+          <button id="settings-tab-gitaccess" class="tab" type="button" data-settings-panel="gitaccess">Git 접속</button>
           <button id="settings-tab-apikey" class="tab" type="button" data-settings-panel="apikey" hidden>API 키</button>
+          <button id="settings-tab-update" class="tab" type="button" data-settings-panel="update">업데이트</button>
         </nav>
 
         <div id="settings-pane-env">
@@ -193,8 +228,22 @@
           </div>
         </div>
 
-        <div id="settings-pane-apikey" hidden>
-          <p class="muted">
+         <div id="settings-pane-gitaccess" hidden>
+           <p class="muted">
+             비공개 GitHub 저장소를 사용하려면 아래 중 하나를 설정하세요. SSH 배포 키 경로를 입력하면
+             GitHub 계정 로그인 없이도 클론·푸시할 수 있습니다. 토큰을 입력하면 그 토큰으로 접속합니다.
+           </p>
+           <div id="settings-gitaccess-group" class="settings-groups"></div>
+           <div class="settings-actions">
+             <div class="row">
+               <button id="settings-gitaccess-save" class="primary" type="button">Git 접속 설정 저장</button>
+               <span id="settings-gitaccess-message" class="muted" role="status"></span>
+             </div>
+           </div>
+         </div>
+
+         <div id="settings-pane-apikey" hidden>
+           <p class="muted">
             일일 작업 보고서의 요약을 Gemini AI로 생성하기 위한 API 키를 등록합니다.
             이 메뉴는 관리자(admin 라이선스)만 사용할 수 있습니다. 등록된 API 키는 다른 사용자에게 노출되지 않습니다.
           </p>
@@ -206,12 +255,47 @@
             </div>
           </div>
         </div>
+
+         <div id="settings-pane-update" hidden>
+           <div class="stack">
+             <p class="muted">
+               새 버전이 공개 릴리스 저장소에 올라오면 자동으로 확인해 내려받고, 설치 후 앱을 다시 시작합니다.
+               설치 버전으로 실행할 때만 동작하며, 휴대용(portable) 실행에서는 자동 업데이트가 지원되지 않습니다.
+             </p>
+             <div class="update-summary">
+               <div class="setting-label">현재 버전</div>
+               <div class="row">
+                 <strong id="update-current-version">-</strong>
+                 <span id="update-phase-pill" class="status-pill off">확인 전</span>
+               </div>
+               <div id="update-latest" class="muted"></div>
+             </div>
+             <div id="update-progress-wrap" class="update-progress-wrap" hidden>
+               <div class="update-progress-track"><div id="update-progress-bar" class="update-progress-bar"></div></div>
+               <div id="update-progress-text" class="muted"></div>
+             </div>
+             <div id="update-notes-wrap" class="update-notes-wrap" hidden>
+               <div class="setting-label">새 버전 변경 내용</div>
+               <pre id="update-notes" class="update-notes"></pre>
+             </div>
+             <div class="row">
+               <button id="update-check" class="primary" type="button">업데이트 확인</button>
+               <button id="update-install" class="primary" type="button" disabled>지금 설치하고 재시작</button>
+               <button id="update-manual" class="ghost" type="button">릴리스 페이지 열기</button>
+             </div>
+             <span id="update-message" class="muted" role="status"></span>
+             <span id="update-detail" class="error-text" role="alert"></span>
+           </div>
+         </div>
       </div>
     </section>
 
-    <footer class="status-bar">
-      <span id="status-bar-text">Starting…</span>
-    </footer>
+        </main>
+        <footer class="status-bar">
+          <span id="status-bar-text">Starting…</span>
+        </footer>
+      </div>
+    </div>
 
     <script src="./index.js"></script>
   </body>

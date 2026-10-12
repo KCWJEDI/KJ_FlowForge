@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export interface GitCardSelection {
@@ -6,6 +6,8 @@ export interface GitCardSelection {
   path: string;
   workBranches: string[];
   activeBranches: string[];
+  /** 이 카드(패널)에서 "저장소 폴더 선택"으로 직접 지정한 로컬 Git 폴더. */
+  localPath?: string;
 }
 
 export interface GitSelectionState {
@@ -49,6 +51,7 @@ function sanitizeCards(value: unknown): GitCardSelection[] {
       path: typeof card.path === "string" ? card.path : "",
       workBranches: sanitizeStringArray(card.workBranches),
       activeBranches: sanitizeStringArray(card.activeBranches),
+      localPath: typeof (card as { localPath?: unknown }).localPath === "string" ? (card as { localPath: string }).localPath : "",
     });
   }
   return result;
@@ -99,6 +102,8 @@ export function sanitizeSelectionState(value: unknown): GitSelectionState {
 
 export class GitSelectionStore {
   private readonly filePath: string;
+  /** 저장 작업을 한 번에 하나씩만 실행합니다(동시 저장이 파일을 깨뜨리는 것 방지). */
+  private writeQueue: Promise<unknown> = Promise.resolve();
 
   public constructor(filePath: string) {
     this.filePath = filePath;
@@ -120,14 +125,38 @@ export class GitSelectionStore {
       const raw = await readFile(this.filePath, "utf8");
       return sanitizeSelectionState(JSON.parse(raw));
     } catch {
-      return { ...EMPTY_STATE };
+      // 예전 버그로 파일이 깨졌을 수 있습니다. 백업본이 있으면 그것으로 복구해,
+      // 사용자가 지정한 저장소 경로가 재시작 후 사라지지 않게 합니다.
+      try {
+        const backup = await readFile(`${this.filePath}.bak`, "utf8");
+        return sanitizeSelectionState(JSON.parse(backup));
+      } catch {
+        return { ...EMPTY_STATE };
+      }
     }
   }
 
   public async save(state: GitSelectionState): Promise<GitSelectionState> {
-    await this.ensure();
     const clean = sanitizeSelectionState(state);
-    await writeFile(this.filePath, JSON.stringify(clean, null, 2), { encoding: "utf8", mode: 0o600 });
+    // 이전 저장이 끝난 뒤에만 다음 저장을 시작하도록 직렬화합니다.
+    this.writeQueue = this.writeQueue.then(() => this.writeAtomic(clean)).catch(() => undefined);
+    await this.writeQueue;
     return clean;
+  }
+
+  /**
+   * 임시 파일에 먼저 쓴 뒤 rename 으로 교체합니다.
+   *
+   * 같은 파일에 직접 덮어쓰면 저장이 겹칠 때 내용이 섞여 JSON 이 깨집니다.
+   * 그렇게 깨진 파일은 다음 실행에서 파싱에 실패해 저장해 둔 저장소 경로가
+   * 통째로 사라집니다. rename 은 원자적이므로 항상 온전한 파일만 남습니다.
+   */
+  private async writeAtomic(clean: GitSelectionState): Promise<void> {
+    await this.ensure();
+    const tempFile = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile(tempFile, JSON.stringify(clean, null, 2), { encoding: "utf8", mode: 0o600 });
+    // 교체 직전 상태를 백업해 둡니다(교체 도중 문제가 생겨도 복구 가능).
+    try { await rename(this.filePath, `${this.filePath}.bak`); } catch { /* 첫 저장이면 백업할 원본이 없음 */ }
+    await rename(tempFile, this.filePath);
   }
 }

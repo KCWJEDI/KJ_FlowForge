@@ -22,6 +22,14 @@ export class NotionAdapter {
     this.client = config.token ? new Client({ auth: config.token }) : null;
   }
 
+  /** 저장소별 토큰으로 별도 Client 인스턴스를 만듭니다. */
+  public static forToken(token: string): NotionAdapter {
+    return new NotionAdapter({ token });
+  }
+
+  public get hasToken(): boolean {
+    return Boolean(this.config.token?.trim());
+  }
   public get enabled(): boolean {
     return this.client !== null;
   }

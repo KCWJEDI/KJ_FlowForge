@@ -44,7 +44,48 @@ npm test            # vitest run
 npm run build       # esbuild -> dist/ (main, preload, renderer)
 npm start           # build + launch Electron
 npm run dev         # build in watch mode
+npm run package:win  # NSIS 설치본 + latest.yml 생성 (release/)
+npm run release:prepare  # 버전업 + 서명(설정 시) + 빌드 + 업데이트 저장소 업로드
 ```
+
+## 자동 업데이트
+
+설치 버전(NSIS)은 시작 시 공개 릴리스 저장소
+`KCWJEDI/KJ_FlowForge_Releases`의 `latest.yml`을 읽어 새 버전을 확인하고,
+있으면 자동으로 내려받습니다. 내려받은 뒤에는 설정 → **업데이트** 탭에서
+**지금 설치하고 재시작**을 누르면 설치 후 앱이 다시 시작됩니다. 새 버전이
+있으면 좌측 하단 표시기에 현재 버전과 새 버전이 함께 표시됩니다.
+
+동작 환경과 한계:
+
+- 설치 버전(`KJ-FlowForge-Setup-x.y.z-x64.exe`)에서만 동작합니다. 휴대용(portable)
+  실행에서는 자동 업데이트가 지원되지 않으므로 설정 → 업데이트 탭에 안내가 표시됩니다.
+- 개발 실행(`npm start`)에서는 업데이트를 확인하지 않습니다.
+- 서명하지 않은 빌드도 버전 확인과 다운로드는 되지만, 서명이 없으면 Windows
+  SmartScreen 경고가 표시될 수 있습니다.
+
+새 버전 배포 순서:
+
+1. `GH_TOKEN`(또는 `GITHUB_TOKEN`)에 `KJ_FlowForge_Releases` 쓰기 권한을 준비합니다.
+2. `npm run release:prepare`를 실행합니다. 패치 버전을 올리고, 서명 설정이 있으면
+   서명한 뒤, NSIS 설치본과 `latest.yml`을 릴리스로 업로드합니다.
+3. 실행 중인 앱이 다음 확인 주기(시작 후 8초, 이후 6시간마다)에 새 버전을 감지합니다.
+
+## 코드 서명
+
+`package.json`의 `build.win`은 `signAndEditExecutable`이 켜져 있어, 인증서가
+설정되면 설치본과 내부 실행 파일에 Authenticode 서명을 적용합니다. 인증서가
+없으면 서명을 건너뛰고 빌드는 계속 진행합니다.
+
+인증서는 다음 중 하나로 지정합니다.
+
+- 환경변수: `WIN_CSC_LINK`(또는 `CSC_LINK`)에 `.pfx`/`.p12` 경로,
+  `WIN_CSC_KEY_PASSWORD`에 암호.
+- 로컬 파일: `config/signing.json`에
+  `{ "certificateFile": "C:\\\\keys\\\\flowforge.pfx", "certificatePassword": "..." }`.
+  `config/`는 `.gitignore`에 포함되어 커밋되지 않습니다.
+
+인증서 파일과 암호는 절대 저장소에 커밋하지 마세요.
 
 ## Environment
 

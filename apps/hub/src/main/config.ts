@@ -2,10 +2,10 @@ import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import type { GitRepositorySetting, PublicConfig } from "../shared/ipc";
+import type { GitRepositorySetting, LicenseRole, PublicConfig } from "../shared/ipc";
 import { applyEnvToProcess, readEnvFile } from "./env-store";
 
-const DEFAULT_PROJECTS_URL =
+export const DEFAULT_PROJECTS_URL =
   "https://raw.githubusercontent.com/KCWJEDI/KJ_FlowForge_Config/main/projects.json";
 
 const envSchema = z.object({
@@ -23,9 +23,8 @@ const envSchema = z.object({
   HUB_GIT_BRANCHES: z.string().optional(),
   DISCORD_BOT_TOKEN: z.string().optional(),
   DISCORD_CHANNEL_ID: z.string().optional(),
-  NOTION_TOKEN: z.string().optional(),
-  NOTION_DATABASE_ID: z.string().optional(),
   GITHUB_TOKEN: z.string().optional(),
+  GIT_SSH_KEY_PATH: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().optional(),
 });
@@ -51,8 +50,10 @@ export interface HubConfig {
     projects?: string[];
   };
   discord: { token?: string; channelId?: string };
-  notion: { token?: string; databaseId?: string };
+  notion: { enabled: boolean };
   github: { token?: string; owner?: string; repo?: string };
+  /** GitHub 계정 없이 저장소에 접속할 SSH 배포 키 경로(HTTPS 토큰보다 우선). */
+  sshKeyPath: string;
   gemini: { apiKey?: string; model: string };
 }
 
@@ -93,13 +94,14 @@ export async function loadConfig(dataDirectory: string, envFile: string): Promis
       projects: parseBranchList(env.HUB_DAILY_AUTOMATION_PROJECTS),
     },
     discord: { token: env.DISCORD_BOT_TOKEN, channelId: env.DISCORD_CHANNEL_ID },
-    notion: { token: env.NOTION_TOKEN, databaseId: env.NOTION_DATABASE_ID },
+    notion: { enabled: false },
     github: {
       token: env.GITHUB_TOKEN,
       ...(githubParts.length === 2 && githubParts[0] && githubParts[1]
         ? { owner: githubParts[0], repo: githubParts[1] }
         : {}),
     },
+    sshKeyPath: (env.GIT_SSH_KEY_PATH ?? "").trim(),
     gemini: {
       apiKey: env.GEMINI_API_KEY,
       model: (env.GEMINI_MODEL ?? "gemini-3.5-flash-lite").trim() || "gemini-3.5-flash-lite",
@@ -128,7 +130,7 @@ function parseRepositories(
       const parsed = JSON.parse(repositoriesRaw) as unknown;
       if (Array.isArray(parsed)) {
         return parsed
-          .filter((item): item is { project?: unknown; label?: unknown; username?: unknown; defaultBranch?: unknown; path?: unknown; url?: unknown; branches?: unknown; discordMinCommits?: unknown; discordBranches?: unknown; notionDatabaseId?: unknown; discordChannelId?: unknown } =>
+          .filter((item): item is { project?: unknown; label?: unknown; username?: unknown; defaultBranch?: unknown; path?: unknown; url?: unknown; branches?: unknown; discordMinCommits?: unknown; discordBranches?: unknown; notionDatabaseId?: unknown; notionToken?: unknown; discordChannelId?: unknown } =>
            Boolean(item) && typeof item === "object")
          .map((item) => ({
            project: typeof item.project === "string" && item.project.trim() ? item.project.trim() : "",
@@ -141,6 +143,7 @@ function parseRepositories(
            discordMinCommits: parseMinCommits(item.discordMinCommits),
            discordBranches: parseBranchArray(item.discordBranches),
            notionDatabaseId: typeof item.notionDatabaseId === "string" ? item.notionDatabaseId.trim() : "",
+           notionToken: typeof item.notionToken === "string" ? item.notionToken.trim() : "",
            discordChannelId: typeof item.discordChannelId === "string" ? item.discordChannelId.trim() : "",
          }))
          .filter((item) => item.path.length > 0);
@@ -151,7 +154,7 @@ function parseRepositories(
   }
   const legacy = legacyRepository?.trim();
   if (legacy) {
-    return [{ project: "", label: "기본", username: "", defaultBranch: "", path: legacy, url: "", branches: parseBranchList(legacyBranches), notionDatabaseId: "" }];
+    return [{ project: "", label: "기본", username: "", defaultBranch: "", path: legacy, url: "", branches: parseBranchList(legacyBranches), notionDatabaseId: "", notionToken: "" }];
   }
   return [];
 }
@@ -164,16 +167,17 @@ function parseMinCommits(value: unknown): number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
-export function toPublicConfig(config: HubConfig): PublicConfig {
+export function toPublicConfig(config: HubConfig, role: LicenseRole = "admin"): PublicConfig {
   return {
     httpPort: config.httpPort,
     tcpPort: config.tcpPort,
     commandTimeoutMs: config.commandTimeoutMs,
-    repositories: config.repositories,
-    secretFile: config.secretFile,
+    // 일반 유저에게는 관리자의 로컬 저장소 목록을 노출하지 않습니다.
+    repositories: role === "admin" ? config.repositories : [],
+    secretFile: role === "admin" ? config.secretFile : "",
     integrations: {
       discord: Boolean(config.discord.token),
-      notion: Boolean(config.notion.token),
+      notion: config.repositories.some((repo) => Boolean(repo.notionToken?.trim())),
       github: Boolean(config.github.token),
       gemini: Boolean(config.gemini.apiKey),
     },
