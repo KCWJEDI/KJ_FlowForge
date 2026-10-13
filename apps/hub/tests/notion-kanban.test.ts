@@ -72,6 +72,15 @@ describe("Notion 칸반 매핑", () => {
     expect(board.cards[0]!.assignees).toEqual(["윤서"]);
   });
 
+  it("그룹 속성 이름이 틀려도 status 속성을 자동으로 찾습니다", async () => {
+    const state = baseState();
+    const board = await readKanbanBoard({ client: fakeClient(state), databaseId: "db", groupProperty: "Status" });
+    expect(board.readOnly).toBe(false);
+    expect(board.groupProperty).toBe("상태");
+    expect(board.columns.map((c) => c.id)).toEqual(["시작 전", "진행 중", "완료"]);
+    expect(board.cards[0]!.columnId).toBe("진행 중");
+  });
+
   it("그룹 속성이 status/select가 아니면 읽기 전용으로 표시합니다", async () => {
     const state = baseState();
     state.schema = { "이름": { type: "title" }, "상태": { type: "rich_text" } };

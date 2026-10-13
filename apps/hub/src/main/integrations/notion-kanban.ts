@@ -50,13 +50,23 @@ const TITLE_LIMIT = 2_000;
 function resolveGroupSchema(
   schema: Record<string, NotionPropertySchema>,
   groupProperty: string,
-): { type: "status" | "select" | null; options: Array<{ name: string; color?: string }> } {
+): { name: string | null; type: "status" | "select" | null; options: Array<{ name: string; color?: string }> } {
   const property = schema[groupProperty];
-  if (!property || !property.type || !GROUP_PROPERTY_TYPES.has(property.type)) {
-    return { type: null, options: [] };
+  if (property && property.type && GROUP_PROPERTY_TYPES.has(property.type)) {
+    const options = property.type === "status" ? property.status?.options ?? [] : property.select?.options ?? [];
+    return { name: groupProperty, type: property.type as "status" | "select", options };
   }
-  const options = property.type === "status" ? property.status?.options ?? [] : property.select?.options ?? [];
-  return { type: property.type as "status" | "select", options };
+  // 이름이 설정과 다르거나(오타·인코딩 문제) 없으면 status/select 속성을 자동으로 찾습니다.
+  const entries = Object.entries(schema);
+  const statusEntry = entries.find(([, value]) => value.type === "status");
+  if (statusEntry) {
+    return { name: statusEntry[0], type: "status", options: statusEntry[1].status?.options ?? [] };
+  }
+  const selectEntry = entries.find(([, value]) => value.type === "select");
+  if (selectEntry) {
+    return { name: selectEntry[0], type: "select", options: selectEntry[1].select?.options ?? [] };
+  }
+  return { name: null, type: null, options: [] };
 }
 
 function findTitlePropertyName(schema: Record<string, NotionPropertySchema>): string | null {
@@ -93,24 +103,27 @@ async function retrieveSchema(deps: KanbanDeps): Promise<{
   schema: Record<string, NotionPropertySchema>;
   groupType: "status" | "select" | null;
   groupOptions: Array<{ name: string; color?: string }>;
+  groupName: string | null;
 }> {
   const database = (await deps.client.databases.retrieve({ database_id: deps.databaseId })) as unknown as {
     title?: NotionRichText[];
     properties?: Record<string, NotionPropertySchema>;
   };
   const schema = database.properties ?? {};
-  const { type, options } = resolveGroupSchema(schema, deps.groupProperty);
+  const resolved = resolveGroupSchema(schema, deps.groupProperty);
   return {
     title: richTextToString(database.title) || "(제목 없음)",
     schema,
-    groupType: type,
-    groupOptions: options,
+    groupType: resolved.type,
+    groupOptions: resolved.options,
+    groupName: resolved.name,
   };
 }
 
 /** 칸반보드를 읽습니다. 그룹 속성이 status/select가 아니면 readOnly로 표시합니다. */
 export async function readKanbanBoard(deps: KanbanDeps): Promise<KanbanBoard> {
-  const { title, groupType, groupOptions } = await retrieveSchema(deps);
+  const { title, groupType, groupOptions, groupName } = await retrieveSchema(deps);
+  const groupProperty = groupName ?? deps.groupProperty;
   const columns: KanbanColumn[] = groupOptions.map((option) => ({
     id: option.name,
     name: option.name,
@@ -126,7 +139,7 @@ export async function readKanbanBoard(deps: KanbanDeps): Promise<KanbanBoard> {
       start_cursor: cursor,
     })) as unknown as { results?: NotionPage[]; has_more?: boolean; next_cursor?: string | null };
     for (const page of response.results ?? []) {
-      if (page.id) cards.push(toCard(page, deps.groupProperty));
+      if (page.id) cards.push(toCard(page, groupProperty));
     }
     cursor = response.has_more && response.next_cursor ? response.next_cursor : undefined;
   } while (cursor);
@@ -145,7 +158,7 @@ export async function readKanbanBoard(deps: KanbanDeps): Promise<KanbanBoard> {
   return {
     databaseId: deps.databaseId,
     databaseTitle: title,
-    groupProperty: deps.groupProperty,
+    groupProperty,
     columns,
     cards,
     fetchedAt: new Date().toISOString(),
@@ -178,22 +191,23 @@ export async function moveKanbanCard(
   input: { cardId: string; columnId: string; expectedEditedAt?: string },
 ): Promise<void> {
   await assertNotStale(deps, input.cardId, input.expectedEditedAt);
-  const { groupType } = await retrieveSchema(deps);
+  const { groupType, groupName } = await retrieveSchema(deps);
+  const groupProperty = groupName ?? deps.groupProperty;
   if (groupType === "status") {
     await deps.client.pages.update({
       page_id: input.cardId,
-      properties: { [deps.groupProperty]: { status: { name: input.columnId } } },
+      properties: { [groupProperty]: { status: { name: input.columnId } } },
     });
     return;
   }
   if (groupType === "select") {
     await deps.client.pages.update({
       page_id: input.cardId,
-      properties: { [deps.groupProperty]: { select: { name: input.columnId } } },
+      properties: { [groupProperty]: { select: { name: input.columnId } } },
     });
     return;
   }
-  throw new Error("'" + deps.groupProperty + "' 속성이 status 또는 select가 아닙니다.");
+  throw new Error("칸반 열로 쓸 status/select 속성을 찾지 못했습니다.");
 }
 
 /** 새 카드를 만듭니다(노션 페이지 생성). */
@@ -201,16 +215,17 @@ export async function createKanbanCard(
   deps: KanbanDeps,
   input: { title: string; columnId?: string },
 ): Promise<string> {
-  const { schema, groupType } = await retrieveSchema(deps);
+  const { schema, groupType, groupName } = await retrieveSchema(deps);
+  const groupProperty = groupName ?? deps.groupProperty;
   const titleProperty = findTitlePropertyName(schema);
   if (!titleProperty) throw new Error("데이터베이스에 제목(title) 속성이 없습니다.");
   const properties: Record<string, unknown> = {
     [titleProperty]: { title: [{ type: "text", text: { content: input.title.slice(0, TITLE_LIMIT) } }] },
   };
   if (input.columnId && groupType === "status") {
-    properties[deps.groupProperty] = { status: { name: input.columnId } };
+    properties[groupProperty] = { status: { name: input.columnId } };
   } else if (input.columnId && groupType === "select") {
-    properties[deps.groupProperty] = { select: { name: input.columnId } };
+    properties[groupProperty] = { select: { name: input.columnId } };
   }
   const created = (await deps.client.pages.create({
     parent: { database_id: deps.databaseId },
