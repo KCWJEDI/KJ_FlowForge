@@ -6,6 +6,7 @@ import type { GitService } from "../git/git-service";
 import type { DiscordAdapter } from "../integrations/discord-adapter";
 import type { GeminiAdapter } from "../integrations/gemini-adapter";
 import type { GitHubAdapter } from "../integrations/github-adapter";
+import type { NotionAdapter } from "../integrations/notion-adapter";
 import { ensureProjectsCacheDir, parseProjectsFile, serializeProjectsFile, upsertProjectsFromRepositories } from "../projects-store";
 import type { Integrations } from "./integrations";
 import { parseBoolean, parseRepositoriesForConfig } from "./repository-settings";
@@ -16,6 +17,7 @@ export interface SettingsServiceDeps {
   config: HubConfig;
   git: GitService;
   github: GitHubAdapter;
+  notion: NotionAdapter;
   gemini: GeminiAdapter;
   discord: DiscordAdapter;
   dailyAutomation: { reconfigure(): void };
@@ -104,8 +106,10 @@ export class SettingsService {
       token: next.get("DISCORD_BOT_TOKEN") || undefined,
       channelId: next.get("DISCORD_CHANNEL_ID") || undefined,
     };
+    const notionToken = (next.get("NOTION_TOKEN") ?? "").trim() || config.notion.token;
     config.notion = {
-      enabled: config.repositories.some(
+      token: notionToken,
+      enabled: Boolean(notionToken) || config.repositories.some(
         (repo) => Boolean(repo.notionToken?.trim()) && Boolean((repo.notionDatabaseId ?? "").trim()),
       ),
     };
@@ -120,6 +124,7 @@ export class SettingsService {
       model: (next.get("GEMINI_MODEL") ?? "gemini-3.5-flash-lite").trim() || "gemini-3.5-flash-lite",
     };
     github.configure(config.github);
+    this.deps.notion.configure({ token: config.notion.token, databaseId: config.kanbanDatabaseId });
     git.setToken(config.github.token);
     config.sshKeyPath = (next.get("GIT_SSH_KEY_PATH") ?? "").trim();
     git.setSshKey(config.sshKeyPath);

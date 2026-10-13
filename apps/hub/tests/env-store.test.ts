@@ -27,6 +27,7 @@ const EXPECTED_ENV_KEYS = [
   "HUB_DAILY_AUTOMATION_PROJECTS",
   "DISCORD_BOT_TOKEN",
   "DISCORD_CHANNEL_ID",
+  "NOTION_TOKEN",
   "GITHUB_TOKEN",
   "GIT_SSH_KEY_PATH",
   "GEMINI_API_KEY",
@@ -56,7 +57,7 @@ describe("env store definitions", () => {
     const groups = ENV_DEFINITIONS.filter(
       (definition, index) => index === 0 || definition.group !== ENV_DEFINITIONS[index - 1]?.group,
     ).map((definition) => definition.group);
-    expect(groups).toEqual(["Hub", "Automation", "Discord", "GitHub", "AI 요약", "칸반보드"]);
+    expect(groups).toEqual(["Hub", "Automation", "Discord", "Notion", "GitHub", "AI 요약", "칸반보드"]);
   });
 });
 

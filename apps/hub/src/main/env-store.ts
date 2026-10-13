@@ -26,6 +26,7 @@ export const ENV_DEFINITIONS: EnvDefinition[] = [
   { key: "HUB_DAILY_AUTOMATION_PROJECTS", label: "08:00 자동화 대상 프로젝트", group: "Automation", kind: "text", hint: "자동화 탭에서 선택한 프로젝트 목록(쉼표 구분)입니다. 자동화 탭에서 관리됩니다." },
   { key: "DISCORD_BOT_TOKEN", label: "Bot token", group: "Discord", kind: "secret", hint: "Discord Developer Portal → Bot → Reset Token" },
   { key: "DISCORD_CHANNEL_ID", label: "Channel ID", group: "Discord", kind: "text", hint: "Copy from a channel with Developer Mode enabled" },
+  { key: "NOTION_TOKEN", label: "Notion integration token", group: "Notion", kind: "secret", hint: "Notion 통합 토큰입니다. 칸반보드와 일일보고에 사용됩니다. 통합을 대상 페이지/데이터베이스에 연결해야 합니다." },
   { key: "GITHUB_TOKEN", label: "Personal access token", group: "GitHub", kind: "secret", hint: "Needs repo scope; add workflow scope for workflow dispatch" },
   { key: "GIT_SSH_KEY_PATH", label: "SSH 배포 키 파일 경로", group: "GitHub", kind: "path", hint: "GitHub 계정 없이 저장소에 접속할 때 사용할 SSH 개인키 파일 경로입니다(예: C:\\keys\\flowforge_deploy). 비워두면 위 토큰을 사용합니다." },
   { key: "GEMINI_API_KEY", label: "Gemini API Key", group: "AI 요약", kind: "secret", adminOnly: true, hint: "Google AI Studio API key. 관리자만 설정할 수 있습니다. 일일 작업 보고를 Gemini로 요약합니다." },

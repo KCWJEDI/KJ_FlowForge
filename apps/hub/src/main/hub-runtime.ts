@@ -102,7 +102,8 @@ export class HubRuntime extends EventEmitter {
     this.git.setSshKey(config.sshKeyPath);
 
     this.discord = new DiscordAdapter(config.discord);
-    this.notion = new NotionAdapter({});
+    // 앱 공용 Notion 토큰(NOTION_TOKEN). 저장소별 토큰은 일일보고에서 별도로 사용합니다.
+    this.notion = new NotionAdapter({ token: config.notion.token, databaseId: config.kanbanDatabaseId });
     this.github = new GitHubAdapter(config.github);
     this.gemini = new GeminiAdapter(config.gemini);
     this.dailyAutomation = new DailyAutomation({
@@ -157,6 +158,7 @@ export class HubRuntime extends EventEmitter {
       config,
       git: this.git,
       github: this.github,
+      notion: this.notion,
       gemini: this.gemini,
       discord: this.discord,
       dailyAutomation: this.dailyAutomation,

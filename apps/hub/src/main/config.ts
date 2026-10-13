@@ -23,6 +23,8 @@ const envSchema = z.object({
   HUB_GIT_BRANCHES: z.string().optional(),
   DISCORD_BOT_TOKEN: z.string().optional(),
   DISCORD_CHANNEL_ID: z.string().optional(),
+  NOTION_TOKEN: z.string().optional(),
+  NOTION_DATABASE_ID: z.string().optional(),
   GITHUB_TOKEN: z.string().optional(),
   GIT_SSH_KEY_PATH: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
@@ -52,7 +54,7 @@ export interface HubConfig {
     projects?: string[];
   };
   discord: { token?: string; channelId?: string };
-  notion: { enabled: boolean };
+  notion: { enabled: boolean; token?: string };
   github: { token?: string; owner?: string; repo?: string };
   /** GitHub 계정 없이 저장소에 접속할 SSH 배포 키 경로(HTTPS 토큰보다 우선). */
   sshKeyPath: string;
@@ -100,7 +102,7 @@ export async function loadConfig(dataDirectory: string, envFile: string): Promis
       projects: parseBranchList(env.HUB_DAILY_AUTOMATION_PROJECTS),
     },
     discord: { token: env.DISCORD_BOT_TOKEN, channelId: env.DISCORD_CHANNEL_ID },
-    notion: { enabled: false },
+    notion: { enabled: Boolean((env.NOTION_TOKEN ?? "").trim()), token: (env.NOTION_TOKEN ?? "").trim() || undefined },
     github: {
       token: env.GITHUB_TOKEN,
       ...(githubParts.length === 2 && githubParts[0] && githubParts[1]
