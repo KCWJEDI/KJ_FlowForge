@@ -27,6 +27,8 @@ const envSchema = z.object({
   GIT_SSH_KEY_PATH: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().optional(),
+  HUB_KANBAN_DATABASE_ID: z.string().optional(),
+  HUB_KANBAN_GROUP_PROPERTY: z.string().optional(),
 });
 
 export interface HubConfig {
@@ -55,6 +57,10 @@ export interface HubConfig {
   /** GitHub 계정 없이 저장소에 접속할 SSH 배포 키 경로(HTTPS 토큰보다 우선). */
   sshKeyPath: string;
   gemini: { apiKey?: string; model: string };
+  /** 칸반보드로 사용할 Notion 데이터베이스 ID(없으면 칸반 탭 비활성). */
+  kanbanDatabaseId: string;
+  /** 칸반 열로 쓸 Notion 속성 이름(기본 "상태"). */
+  kanbanGroupProperty: string;
 }
 
 export async function loadConfig(dataDirectory: string, envFile: string): Promise<HubConfig> {
@@ -106,6 +112,8 @@ export async function loadConfig(dataDirectory: string, envFile: string): Promis
       apiKey: env.GEMINI_API_KEY,
       model: (env.GEMINI_MODEL ?? "gemini-3.5-flash-lite").trim() || "gemini-3.5-flash-lite",
     },
+    kanbanDatabaseId: (env.HUB_KANBAN_DATABASE_ID ?? "").trim(),
+    kanbanGroupProperty: (env.HUB_KANBAN_GROUP_PROPERTY ?? "상태").trim() || "상태",
   };
 }
 

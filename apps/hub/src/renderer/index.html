@@ -36,6 +36,7 @@
         <nav class="tab-bar" id="main-tabs" aria-label="Main tabs">
           <button id="tab-dashboard" class="tab active" type="button" data-panel="dashboard">대시보드</button>
           <button id="tab-automation" class="tab" type="button" data-panel="automation">08시 일일 작업등록</button>
+          <button id="tab-kanban" class="tab" type="button" data-panel="kanban">칸반보드</button>
           <button id="tab-settings" class="tab" type="button" data-panel="settings">설정</button>
         </nav>
 
@@ -139,6 +140,22 @@
           </div>
         </div>
     </section>
+    </section>
+
+    <section id="panel-kanban" class="layout" hidden>
+      <div class="kanban-toolbar">
+        <div class="kanban-title">
+          <strong id="kanban-board-title">칸반보드</strong>
+          <span id="kanban-board-meta" class="muted"></span>
+        </div>
+        <div class="row">
+          <input id="kanban-new-title" type="text" placeholder="새 카드 제목" />
+          <button id="kanban-add" class="primary" type="button">카드 추가</button>
+          <button id="kanban-refresh" class="ghost" type="button">새로고침</button>
+        </div>
+      </div>
+      <span id="kanban-message" class="muted" role="status"></span>
+      <div id="kanban-board" class="kanban-board"></div>
     </section>
 
     <section id="panel-settings" class="layout" hidden>

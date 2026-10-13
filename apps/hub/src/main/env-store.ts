@@ -30,6 +30,8 @@ export const ENV_DEFINITIONS: EnvDefinition[] = [
   { key: "GIT_SSH_KEY_PATH", label: "SSH 배포 키 파일 경로", group: "GitHub", kind: "path", hint: "GitHub 계정 없이 저장소에 접속할 때 사용할 SSH 개인키 파일 경로입니다(예: C:\\keys\\flowforge_deploy). 비워두면 위 토큰을 사용합니다." },
   { key: "GEMINI_API_KEY", label: "Gemini API Key", group: "AI 요약", kind: "secret", adminOnly: true, hint: "Google AI Studio API key. 관리자만 설정할 수 있습니다. 일일 작업 보고를 Gemini로 요약합니다." },
   { key: "GEMINI_MODEL", label: "Gemini 모델", group: "AI 요약", kind: "text", adminOnly: true, hint: "요약에 사용할 Gemini 모델명 (기본: gemini-3.5-flash-lite)" },
+  { key: "HUB_KANBAN_DATABASE_ID", label: "칸반보드 Notion 데이터베이스 ID", group: "칸반보드", kind: "text", hint: "칸반보드로 사용할 Notion 데이터베이스 ID입니다. 이 데이터베이스에 통합(KJ_FlowForge)이 연결되어 있어야 합니다." },
+  { key: "HUB_KANBAN_GROUP_PROPERTY", label: "칸반 열 속성 이름", group: "칸반보드", kind: "text", hint: "칸반 열로 사용할 Notion 속성 이름입니다(기본: 상태). status 또는 select 속성이어야 합니다." },
 ];
 
 export const ENV_KEYS = ENV_DEFINITIONS.map((definition) => definition.key);

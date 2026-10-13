@@ -243,9 +243,37 @@ export function registerIpc(
     service.install();
     return true;
   });
+
+  // ----- 칸반보드 (Notion 동기화) -----
+  ipcMain.handle("hub:get-kanban-board", () => runtime.getKanbanBoard());
+  ipcMain.handle("hub:move-kanban-card", (_event, raw: unknown) => {
+    const input = z.object({
+      cardId: z.string().min(1),
+      columnId: z.string().min(1),
+      expectedEditedAt: z.string().optional(),
+    }).parse(raw);
+    return runtime.moveKanbanCard(input);
+  });
+  ipcMain.handle("hub:create-kanban-card", (_event, raw: unknown) => {
+    const input = z.object({
+      title: z.string().min(1).max(2000),
+      columnId: z.string().optional(),
+    }).parse(raw);
+    return runtime.createKanbanCard(input);
+  });
+  ipcMain.handle("hub:delete-kanban-card", (_event, raw: unknown) => {
+    const input = z.object({ cardId: z.string().min(1) }).parse(raw);
+    return runtime.deleteKanbanCard(input.cardId);
+  });
+  const kanbanChangedListener = (board: unknown): void => {
+    const window = getWindow();
+    if (window && !window.isDestroyed()) window.webContents.send("hub:kanban-changed", board);
+  };
+  runtime.on("kanbanChanged", kanbanChangedListener);
   return () => {
     runtime.off("stateChanged", stateListener);
     runtime.off("repositoryChanged", repositoryChangedListener);
+    runtime.off("kanbanChanged", kanbanChangedListener);
     updater?.off("status", updaterStatusListener);
     for (const channel of [
       "hub:get-state",
@@ -277,6 +305,10 @@ export function registerIpc(
       "hub:get-update-status",
       "hub:check-for-updates",
       "hub:install-update",
+      "hub:get-kanban-board",
+      "hub:move-kanban-card",
+      "hub:create-kanban-card",
+      "hub:delete-kanban-card",
     ]) {
       ipcMain.removeHandler(channel);
     }

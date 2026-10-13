@@ -309,6 +309,47 @@ export interface UpdateStatus {
   manualDownloadUrl: string;
 }
 
+// ----- 칸반보드 (Notion 데이터베이스 동기화) -----
+
+export interface KanbanColumn {
+  /** 열 식별자(Notion status/select 옵션 이름) */
+  id: string;
+  name: string;
+  color?: string;
+}
+
+export interface KanbanCard {
+  /** Notion 페이지 ID */
+  id: string;
+  title: string;
+  /** 현재 열 ID(상태 옵션 이름) */
+  columnId: string;
+  assignees: string[];
+  url: string;
+  /** 마지막 수정 시각(충돌 감지용) */
+  lastEditedAt: string;
+}
+
+export interface KanbanBoard {
+  databaseId: string;
+  databaseTitle: string;
+  /** 그룹 속성 이름(예: "상태") */
+  groupProperty: string;
+  columns: KanbanColumn[];
+  cards: KanbanCard[];
+  fetchedAt: string;
+  /** true면 새 카드를 만들 수 없음(속성 구조 문제 등) */
+  readOnly: boolean;
+  message?: string;
+}
+
+export interface KanbanMoveInput {
+  cardId: string;
+  columnId: string;
+  /** 읽은 시점의 lastEditedAt. 다르면 서버 값으로 되돌리고 적용하지 않습니다. */
+  expectedEditedAt?: string;
+}
+
 export interface DashboardState {
   startedAt: string;
   config: PublicConfig;
@@ -364,6 +405,16 @@ export interface HubApi {
   checkForUpdates(): Promise<UpdateStatus>;
   /** 내려받은 업데이트를 설치하고 앱을 다시 시작합니다. */
   installUpdate(): Promise<boolean>;
+  /** 노션 데이터베이스 기반 칸반보드를 가져옵니다. */
+  getKanbanBoard(): Promise<KanbanBoard>;
+  /** 카드를 다른 열로 이동합니다(status/select 속성 변경). */
+  moveKanbanCard(args: KanbanMoveInput): Promise<KanbanBoard>;
+  /** 새 카드를 만듭니다(노션 페이지 생성). */
+  createKanbanCard(args: { title: string; columnId?: string }): Promise<KanbanBoard>;
+  /** 카드를 삭제합니다(노션 페이지 보관). */
+  deleteKanbanCard(args: { cardId: string }): Promise<KanbanBoard>;
+  /** 칸반보드 변경 구독(폴링/조작 결과). */
+  onKanbanChanged(listener: (board: KanbanBoard) => void): () => void;
   /** 업데이트 상태 변경 구독(확인/다운로드/완료/오류). */
   onUpdateStatus(listener: (status: UpdateStatus) => void): () => void;
   onStateChanged(listener: (state: DashboardState) => void): () => void;

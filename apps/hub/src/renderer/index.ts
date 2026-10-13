@@ -10,6 +10,7 @@ import type {
   SettingsView,
   SettingFieldView,
   UpdateStatus,
+  KanbanBoard,
 } from "../shared/ipc";
 import { isSameRepository } from "../shared/repo-identity";
 import { filterBranchesByAllowed } from "../shared/branch-selection";
@@ -52,9 +53,18 @@ const $ = {
   mainTabDashboard: required<HTMLButtonElement>(document.getElementById("tab-dashboard"), "tab-dashboard"),
   mainTabAutomation: required<HTMLButtonElement>(document.getElementById("tab-automation"), "tab-automation"),
   mainTabSettings: required<HTMLButtonElement>(document.getElementById("tab-settings"), "tab-settings"),
+  mainTabKanban: required<HTMLButtonElement>(document.getElementById("tab-kanban"), "tab-kanban"),
   panelDashboard: required<HTMLElement>(document.getElementById("panel-dashboard"), "panel-dashboard"),
   panelAutomation: required<HTMLElement>(document.getElementById("panel-automation"), "panel-automation"),
+  panelKanban: required<HTMLElement>(document.getElementById("panel-kanban"), "panel-kanban"),
   panelSettings: required<HTMLElement>(document.getElementById("panel-settings"), "panel-settings"),
+  kanbanBoardTitle: required<HTMLElement>(document.getElementById("kanban-board-title"), "kanban-board-title"),
+  kanbanBoardMeta: required<HTMLElement>(document.getElementById("kanban-board-meta"), "kanban-board-meta"),
+  kanbanBoard: required<HTMLElement>(document.getElementById("kanban-board"), "kanban-board"),
+  kanbanNewTitle: required<HTMLInputElement>(document.getElementById("kanban-new-title"), "kanban-new-title"),
+  kanbanAdd: required<HTMLButtonElement>(document.getElementById("kanban-add"), "kanban-add"),
+  kanbanRefresh: required<HTMLButtonElement>(document.getElementById("kanban-refresh"), "kanban-refresh"),
+  kanbanMessage: required<HTMLElement>(document.getElementById("kanban-message"), "kanban-message"),
   dashboardProject: required<HTMLSelectElement>(document.getElementById("dashboard-project"), "dashboard-project"),
   dashboardProjectRenameInput: required<HTMLInputElement>(document.getElementById("dashboard-project-rename-input"), "dashboard-project-rename-input"),
   dashboardProjectRename: required<HTMLButtonElement>(document.getElementById("dashboard-project-rename"), "dashboard-project-rename"),
@@ -181,6 +191,8 @@ const state: {
   discordCollapsed: Record<number, boolean>;
   discordTestStates: Record<number, { state: "untested" | "testing" | "connected" | "error"; message: string }>;
   update: UpdateStatus | null;
+  kanban: KanbanBoard | null;
+  kanbanBusy: boolean;
 } = {
   dashboard: null,
   git: null,
@@ -216,6 +228,8 @@ const state: {
   discordCollapsed: {},
   discordTestStates: {},
   update: null,
+  kanban: null,
+  kanbanBusy: false,
 };
 
 function setStatus(message: string): void {
@@ -1956,13 +1970,183 @@ function setSettingsBusy(busy: boolean): void {
   $.settingsTest.disabled = busy;
 }
 
-function switchMainPanel(panel: "dashboard" | "automation" | "settings"): void {
+
+// ----- 칸반보드 (Notion 동기화) -----
+
+let kanbanDragCardId: string | null = null;
+
+async function refreshKanban(): Promise<void> {
+  if (state.kanbanBusy) return;
+  state.kanbanBusy = true;
+  try {
+    const board = await window.hub.getKanbanBoard();
+    renderKanban(board);
+  } catch (error) {
+    $.kanbanMessage.className = "error-text";
+    $.kanbanMessage.textContent = "칸반보드를 불러오지 못했습니다: " + (error instanceof Error ? error.message : String(error));
+  } finally {
+    state.kanbanBusy = false;
+  }
+}
+
+function renderKanban(board: KanbanBoard): void {
+  state.kanban = board;
+  $.kanbanBoardTitle.textContent = board.databaseTitle || "칸반보드";
+  $.kanbanBoardMeta.textContent = board.message
+    ? board.message
+    : board.fetchedAt
+      ? "마지막 동기화 " + formatTime(board.fetchedAt) + " · 카드 " + board.cards.length + "개"
+      : "";
+  $.kanbanMessage.className = "muted";
+  $.kanbanMessage.textContent = "";
+
+  $.kanbanBoard.innerHTML = "";
+  for (const column of board.columns) {
+    const columnEl = document.createElement("div");
+    columnEl.className = "kanban-column";
+    columnEl.dataset.columnId = column.id;
+
+    const head = document.createElement("div");
+    head.className = "kanban-column-head";
+    const count = board.cards.filter((card) => card.columnId === column.id).length;
+    head.textContent = column.name + " (" + count + ")";
+    columnEl.appendChild(head);
+
+    const list = document.createElement("div");
+    list.className = "kanban-cards";
+    list.dataset.columnId = column.id;
+    // 드롭 대상
+    list.addEventListener("dragover", (event) => {
+      if (kanbanDragCardId) event.preventDefault();
+      list.classList.add("kanban-drop");
+    });
+    list.addEventListener("dragleave", () => list.classList.remove("kanban-drop"));
+    list.addEventListener("drop", (event) => {
+      event.preventDefault();
+      list.classList.remove("kanban-drop");
+      const cardId = kanbanDragCardId ?? event.dataTransfer?.getData("text/plain") ?? "";
+      kanbanDragCardId = null;
+      if (cardId) void moveKanbanCardTo(cardId, column.id);
+    });
+
+    for (const card of board.cards.filter((item) => item.columnId === column.id)) {
+      list.appendChild(renderKanbanCard(card));
+    }
+    columnEl.appendChild(list);
+    $.kanbanBoard.appendChild(columnEl);
+  }
+
+  // 열이 하나도 없을 때 안내
+  if (board.columns.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "muted";
+    empty.textContent = board.readOnly
+      ? "이 데이터베이스는 칸반 열로 쓸 status/select 속성이 없습니다."
+      : "표시할 열이 없습니다.";
+    $.kanbanBoard.appendChild(empty);
+  }
+}
+
+function renderKanbanCard(card: KanbanBoard["cards"][number]): HTMLElement {
+  const el = document.createElement("div");
+  el.className = "kanban-card";
+  el.draggable = true;
+  el.dataset.cardId = card.id;
+
+  const title = document.createElement("div");
+  title.className = "kanban-card-title";
+  title.textContent = card.title;
+  el.appendChild(title);
+
+  if (card.assignees.length > 0) {
+    const meta = document.createElement("div");
+    meta.className = "kanban-card-meta";
+    meta.textContent = card.assignees.join(", ");
+    el.appendChild(meta);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "kanban-card-actions";
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "ghost danger kanban-card-delete";
+  remove.textContent = "삭제";
+  remove.addEventListener("click", (event) => {
+    event.stopPropagation();
+    void deleteKanbanCard(card.id);
+  });
+  actions.appendChild(remove);
+  el.appendChild(actions);
+
+  el.addEventListener("dragstart", (event) => {
+    kanbanDragCardId = card.id;
+    event.dataTransfer?.setData("text/plain", card.id);
+    el.classList.add("dragging");
+  });
+  el.addEventListener("dragend", () => {
+    kanbanDragCardId = null;
+    el.classList.remove("dragging");
+  });
+  return el;
+}
+
+/** 낙관적 이동: 화면을 먼저 옮기고 서버 반영 후 보드를 맞춥니다. */
+async function moveKanbanCardTo(cardId: string, columnId: string): Promise<void> {
+  const board = state.kanban;
+  if (!board) return;
+  const card = board.cards.find((item) => item.id === cardId);
+  if (!card || card.columnId === columnId) return;
+  const previousColumn = card.columnId;
+  card.columnId = columnId;
+  renderKanban(board);
+  try {
+    const next = await window.hub.moveKanbanCard({ cardId, columnId, expectedEditedAt: card.lastEditedAt });
+    renderKanban(next);
+  } catch (error) {
+    card.columnId = previousColumn;
+    renderKanban(board);
+    $.kanbanMessage.className = "error-text";
+    $.kanbanMessage.textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function createKanbanCard(): Promise<void> {
+  const title = $.kanbanNewTitle.value.trim();
+  if (!title) {
+    $.kanbanMessage.className = "error-text";
+    $.kanbanMessage.textContent = "카드 제목을 입력하세요.";
+    return;
+  }
+  const firstColumn = state.kanban?.columns[0]?.id;
+  try {
+    const board = await window.hub.createKanbanCard({ title, columnId: firstColumn });
+    $.kanbanNewTitle.value = "";
+    renderKanban(board);
+  } catch (error) {
+    $.kanbanMessage.className = "error-text";
+    $.kanbanMessage.textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function deleteKanbanCard(cardId: string): Promise<void> {
+  try {
+    const board = await window.hub.deleteKanbanCard({ cardId });
+    renderKanban(board);
+  } catch (error) {
+    $.kanbanMessage.className = "error-text";
+    $.kanbanMessage.textContent = error instanceof Error ? error.message : String(error);
+  }
+}
+
+function switchMainPanel(panel: "dashboard" | "automation" | "kanban" | "settings"): void {
   $.panelDashboard.hidden = panel !== "dashboard";
   $.panelAutomation.hidden = panel !== "automation";
+  $.panelKanban.hidden = panel !== "kanban";
   $.panelSettings.hidden = panel !== "settings";
   $.pageTitle.textContent = panel === "dashboard" ? "대시보드" : panel === "automation" ? "일일 작업등록" : "설정";
   $.mainTabDashboard.classList.toggle("active", panel === "dashboard");
   $.mainTabAutomation.classList.toggle("active", panel === "automation");
+  $.mainTabKanban.classList.toggle("active", panel === "kanban");
   $.mainTabSettings.classList.toggle("active", panel === "settings");
   if (panel === "dashboard") {
     const repos = state.dashboard?.config.repositories ?? [];
@@ -3237,6 +3421,15 @@ function bindEvents(): void {
   $.mainTabDashboard.addEventListener("click", () => switchMainPanel("dashboard"));
   $.mainTabAutomation.addEventListener("click", () => switchMainPanel("automation"));
   $.mainTabSettings.addEventListener("click", () => switchMainPanel("settings"));
+  $.mainTabKanban.addEventListener("click", () => {
+    switchMainPanel("kanban");
+    void refreshKanban();
+  });
+  $.kanbanRefresh.addEventListener("click", () => void refreshKanban());
+  $.kanbanAdd.addEventListener("click", () => void createKanbanCard());
+  $.kanbanNewTitle.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") void createKanbanCard();
+  });
   $.dashboardProject.addEventListener("change", () => {
     document.querySelectorAll(".dashboard-extra-card").forEach((card) => card.remove());
     restoreProjectWorkBranches();
@@ -3372,6 +3565,10 @@ async function init(): Promise<void> {
   });
   window.hub.onUpdateStatus((status) => renderUpdate(status));
   void refreshUpdateStatus();
+  window.hub.onKanbanChanged((board) => {
+    // 사용자가 드래그 중이 아니면 폴링 결과로 보드를 갱신합니다.
+    if (!kanbanDragCardId) renderKanban(board);
+  });
   // 연결된 폴더가 외부에서 변경되면 Git 상태를 자동으로 다시 읽습니다.
   window.hub.onRepositoryChanged((repository) => {
     if (repository !== watchedRepository) return;

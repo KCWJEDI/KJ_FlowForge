@@ -48,6 +48,8 @@ function freshConfig(dir: string): HubConfig {
     github: {},
     gemini: { model: "gemini-3.5-flash-lite" },
     sshKeyPath: "",
+    kanbanDatabaseId: "",
+    kanbanGroupProperty: "상태",
   };
 }
 

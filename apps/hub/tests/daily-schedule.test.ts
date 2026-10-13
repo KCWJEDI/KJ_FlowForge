@@ -327,6 +327,8 @@ function testConfig(dataDirectory: string): HubConfig {
     github: {},
     gemini: { apiKey: "", model: "gemini-3.5-flash-lite" },
     sshKeyPath: "",
+    kanbanDatabaseId: "",
+    kanbanGroupProperty: "상태",
   };
 }
 

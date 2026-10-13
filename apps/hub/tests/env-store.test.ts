@@ -31,6 +31,8 @@ const EXPECTED_ENV_KEYS = [
   "GIT_SSH_KEY_PATH",
   "GEMINI_API_KEY",
   "GEMINI_MODEL",
+  "HUB_KANBAN_DATABASE_ID",
+  "HUB_KANBAN_GROUP_PROPERTY",
 ] as const;
 
 describe("env store definitions", () => {
@@ -54,7 +56,7 @@ describe("env store definitions", () => {
     const groups = ENV_DEFINITIONS.filter(
       (definition, index) => index === 0 || definition.group !== ENV_DEFINITIONS[index - 1]?.group,
     ).map((definition) => definition.group);
-    expect(groups).toEqual(["Hub", "Automation", "Discord", "GitHub", "AI 요약"]);
+    expect(groups).toEqual(["Hub", "Automation", "Discord", "GitHub", "AI 요약", "칸반보드"]);
   });
 });
 

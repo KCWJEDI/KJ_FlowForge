@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { DashboardState, HubApi, UpdateStatus } from "../shared/ipc";
+import type { DashboardState, HubApi, KanbanBoard, UpdateStatus } from "../shared/ipc";
 
 const api: HubApi = {
   getState: () => ipcRenderer.invoke("hub:get-state"),
@@ -43,6 +43,15 @@ const api: HubApi = {
     const wrapped = (_event: Electron.IpcRendererEvent, status: UpdateStatus): void => listener(status);
     ipcRenderer.on("hub:update-status", wrapped);
     return () => ipcRenderer.removeListener("hub:update-status", wrapped);
+  },
+  getKanbanBoard: () => ipcRenderer.invoke("hub:get-kanban-board"),
+  moveKanbanCard: (args) => ipcRenderer.invoke("hub:move-kanban-card", args),
+  createKanbanCard: (args) => ipcRenderer.invoke("hub:create-kanban-card", args),
+  deleteKanbanCard: (args) => ipcRenderer.invoke("hub:delete-kanban-card", args),
+  onKanbanChanged: (listener) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, board: KanbanBoard): void => listener(board);
+    ipcRenderer.on("hub:kanban-changed", wrapped);
+    return () => ipcRenderer.removeListener("hub:kanban-changed", wrapped);
   },
   onStateChanged: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, state: DashboardState): void => listener(state);

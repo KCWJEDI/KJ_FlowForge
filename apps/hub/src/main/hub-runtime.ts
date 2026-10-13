@@ -12,6 +12,8 @@ import type {
   GitPullResult,
   GitStatusView,
   IntegrationConnectionStatus,
+  KanbanBoard,
+  KanbanMoveInput,
   LicenseRole,
   ManualDailyReportInput,
   ManualDailyReportResult,
@@ -39,6 +41,7 @@ import { Integrations } from "./runtime/integrations";
 import { ProjectAccess, type ProjectRegistry } from "./runtime/project-access";
 import type { RuntimeContext } from "./runtime/runtime-context";
 import { SettingsService } from "./runtime/settings-service";
+import { KanbanService } from "./runtime/kanban-service";
 
 /**
  * 앱의 런타임 파사드입니다.
@@ -73,6 +76,7 @@ export class HubRuntime extends EventEmitter {
   private readonly workflow: GitWorkflow;
   private readonly integrations: Integrations;
   private readonly settingsService: SettingsService;
+  private readonly kanban: KanbanService;
 
   public readonly discord: DiscordAdapter;
   public readonly notion: NotionAdapter;
@@ -161,6 +165,13 @@ export class HubRuntime extends EventEmitter {
       context: this.context,
       onChanged: () => this.emitState(),
     });
+    this.kanban = new KanbanService(
+      () => this.notion.rawClient(),
+      config.kanbanDatabaseId,
+      config.kanbanGroupProperty,
+    );
+    this.kanban.on("changed", (board: KanbanBoard) => this.emit("kanbanChanged", board));
+    this.kanban.on("error", (message: string) => this.emit("kanbanError", message));
   }
 
   public async start(): Promise<void> {
@@ -174,12 +185,15 @@ export class HubRuntime extends EventEmitter {
     // 프로젝트 정의를 로드해 캐시에 채웁니다(일반 사용자 브랜치 배정 판정에도 필요).
     await this.access.getProjects();
     if (this.discord.enabled) await this.discord.start();
+    // 칸반보드는 관리자·일반 모두 조회 가능(노션이 권한을 관리).
+    this.kanban.start();
     // 매일 오전 08:00 자동 일일작업 등록은 관리자 라이선스 전용 기능입니다.
     if (this.role === "admin") await this.dailyAutomation.start();
     else await this.dailyAutomation.stop();
   }
 
   public async stop(): Promise<void> {
+    this.kanban.stop();
     await this.dailyAutomation.stop();
     this.watcher.closeAll();
     await Promise.allSettled([this.discord.stop()]);
@@ -326,6 +340,24 @@ export class HubRuntime extends EventEmitter {
 
   public testIntegrations(): Promise<IntegrationConnectionStatus[]> {
     return this.integrations.testIntegrations();
+  }
+
+  // ----- 칸반보드 (Notion 동기화) -----
+
+  public getKanbanBoard(): Promise<KanbanBoard> {
+    return this.kanban.getBoard();
+  }
+
+  public moveKanbanCard(input: KanbanMoveInput): Promise<KanbanBoard> {
+    return this.kanban.move(input);
+  }
+
+  public createKanbanCard(input: { title: string; columnId?: string }): Promise<KanbanBoard> {
+    return this.kanban.create(input);
+  }
+
+  public deleteKanbanCard(cardId: string): Promise<KanbanBoard> {
+    return this.kanban.remove(cardId);
   }
 
   private emitState(): void {

@@ -1,4 +1,5 @@
 import { Client } from "@notionhq/client";
+import type { KanbanBoard, KanbanCard, KanbanColumn } from "../../shared/ipc";
 
 const TEXT_LIMIT = 2_000; // Notion rich text content length limit
 const MAX_PAGE_CHILDREN = 100;
@@ -32,6 +33,11 @@ export class NotionAdapter {
   }
   public get enabled(): boolean {
     return this.client !== null;
+  }
+
+  /** 칸반 서비스 등 다른 모듈이 같은 Notion 클라이언트를 재사용할 수 있게 합니다. */
+  public rawClient(): Client | null {
+    return this.client;
   }
 
   public configure(config: { token?: string; databaseId?: string }): void {
