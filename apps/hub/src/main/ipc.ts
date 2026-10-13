@@ -265,6 +265,10 @@ export function registerIpc(
     const input = z.object({ cardId: z.string().min(1) }).parse(raw);
     return runtime.deleteKanbanCard(input.cardId);
   });
+  ipcMain.handle("hub:set-kanban-database", (_event, raw: unknown) => {
+    const url = z.string().min(1).max(2048).parse(raw);
+    return runtime.setKanbanDatabase(url);
+  });
   const kanbanChangedListener = (board: unknown): void => {
     const window = getWindow();
     if (window && !window.isDestroyed()) window.webContents.send("hub:kanban-changed", board);
@@ -309,6 +313,7 @@ export function registerIpc(
       "hub:move-kanban-card",
       "hub:create-kanban-card",
       "hub:delete-kanban-card",
+      "hub:set-kanban-database",
     ]) {
       ipcMain.removeHandler(channel);
     }

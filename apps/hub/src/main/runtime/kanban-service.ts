@@ -20,11 +20,17 @@ export class KanbanService extends EventEmitter {
 
   public constructor(
     private readonly client: () => Client | null,
-    private readonly databaseId: string,
+    private databaseId: string,
     private readonly groupProperty: string,
     private readonly intervalMs: number = POLL_INTERVAL_MS,
   ) {
     super();
+  }
+
+  /** 연결할 Notion 데이터베이스를 런타임에 바꿉니다(다음 조회부터 적용). */
+  public setDatabase(databaseId: string): void {
+    this.databaseId = databaseId;
+    this.board = null;
   }
 
   public get enabled(): boolean {

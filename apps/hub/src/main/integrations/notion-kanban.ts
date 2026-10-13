@@ -240,3 +240,33 @@ export async function deleteKanbanCard(deps: KanbanDeps, cardId: string): Promis
   await deps.client.pages.update({ page_id: cardId, archived: true });
 }
 
+/**
+ * 노션 데이터베이스 링크/ID에서 데이터베이스 ID를 뽑아냅니다.
+ *
+ * 지원 형식:
+ * - https://app.notion.com/p/<id>?v=<viewId>
+ * - https://www.notion.so/<제목>-<id>?v=<viewId>
+ * - 하이픈 있는/없는 32자리 ID
+ *
+ * URL에서 처음 나오는 32자리 16진수를 데이터베이스 ID로 봅니다(뷰 ID는 ?v= 뒤에 옵니다).
+ */
+export function parseNotionDatabaseId(input: string): string | null {
+  const raw = (input ?? "").trim();
+  if (!raw) return null;
+  const normalize = (hex: string): string =>
+    hex.slice(0, 8) + "-" + hex.slice(8, 12) + "-" + hex.slice(12, 16) + "-" + hex.slice(16, 20) + "-" + hex.slice(20);
+  // 쿼리(뷰 파라미터)와 해시를 제거합니다.
+  const noQuery = raw.split("?")[0]!.split("#")[0]!;
+  // 1) ID만 붙여넣은 경우(하이픈 포함/미포함).
+  const compactWhole = noQuery.replace(/-/g, "");
+  if (/^[0-9a-fA-F]{32}$/.test(compactWhole)) return normalize(compactWhole.toLowerCase());
+  // 2) URL: 마지막 경로 조각의 마지막 하이픈 토큰이 ID입니다(제목 슬러그 뒤에 붙음).
+  const segment = noQuery.split("/").filter(Boolean).pop() ?? "";
+  const tokenHex = (segment.split("-").pop() ?? "").replace(/[^0-9a-fA-F]/g, "");
+  if (tokenHex.length >= 32) return normalize(tokenHex.slice(-32).toLowerCase());
+  // 3) 마지막 수단: 마지막 32자리 16진수 덩어리.
+  const matches = compactWhole.match(/[0-9a-fA-F]{32}/g);
+  if (!matches || matches.length === 0) return null;
+  return normalize(matches[matches.length - 1]!.toLowerCase());
+}
+

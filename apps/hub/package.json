@@ -1,6 +1,6 @@
 {
   "name": "local-unity-workflow-hub",
-  "version": "0.4.15",
+  "version": "0.4.16",
   "private": true,
   "description": "Local Electron hub for Unity, Discord, Notion, and GitHub workflows",
   "author": {

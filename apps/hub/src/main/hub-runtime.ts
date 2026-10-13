@@ -34,6 +34,7 @@ import { GeminiAdapter } from "./integrations/gemini-adapter";
 import { GitHubAdapter } from "./integrations/github-adapter";
 import { NotionAdapter } from "./integrations/notion-adapter";
 import { ensureProjectsCacheDir } from "./projects-store";
+import { writeEnvFile } from "./env-store";
 import { CredentialManager } from "./runtime/credential-manager";
 import { GitBranchState } from "./runtime/git-state";
 import { GitWorkflow } from "./runtime/git-workflow";
@@ -42,6 +43,7 @@ import { ProjectAccess, type ProjectRegistry } from "./runtime/project-access";
 import type { RuntimeContext } from "./runtime/runtime-context";
 import { SettingsService } from "./runtime/settings-service";
 import { KanbanService } from "./runtime/kanban-service";
+import { parseNotionDatabaseId } from "./integrations/notion-kanban";
 
 /**
  * 앱의 런타임 파사드입니다.
@@ -360,6 +362,33 @@ export class HubRuntime extends EventEmitter {
 
   public deleteKanbanCard(cardId: string): Promise<KanbanBoard> {
     return this.kanban.remove(cardId);
+  }
+
+  /**
+   * 노션 데이터베이스 링크/ID를 받아 칸반보드 연결을 바꿉니다.
+   *
+   * 실제로 읽어 본 뒤에만 저장하므로, 잘못된 링크나 공유되지 않은 데이터베이스는
+   * 오류로 알려주고 기존 연결을 유지합니다. 성공 시 .env에 저장해 재시작 후에도 남습니다.
+   */
+  public async setKanbanDatabase(input: string): Promise<KanbanBoard> {
+    const databaseId = parseNotionDatabaseId(input);
+    if (!databaseId) {
+      throw new Error("노션 데이터베이스 링크 또는 ID를 확인할 수 없습니다. 링크를 다시 복사해 주세요.");
+    }
+    if (this.notion.rawClient() === null) {
+      throw new Error("Notion 통합 토큰이 설정되지 않았습니다. 설정 → .env 수정에서 NOTION_TOKEN을 입력하세요.");
+    }
+    this.kanban.setDatabase(databaseId);
+    try {
+      const board = await this.kanban.refresh();
+      this.config.kanbanDatabaseId = databaseId;
+      await writeEnvFile(this.config.envFile, { HUB_KANBAN_DATABASE_ID: databaseId });
+      return board;
+    } catch (error) {
+      // 실패하면 이전 연결로 되돌립니다.
+      this.kanban.setDatabase(this.config.kanbanDatabaseId);
+      throw error;
+    }
   }
 
   private emitState(): void {

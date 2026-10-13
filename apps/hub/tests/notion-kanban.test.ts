@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Client } from "@notionhq/client";
-import { readKanbanBoard, moveKanbanCard, createKanbanCard, deleteKanbanCard } from "../src/main/integrations/notion-kanban";
+import { readKanbanBoard, moveKanbanCard, createKanbanCard, deleteKanbanCard, parseNotionDatabaseId } from "../src/main/integrations/notion-kanban";
 
 /**
  * Notion 데이터베이스 칸반 매핑의 순수 로직을 가짜 클라이언트로 검증합니다.
@@ -62,6 +62,13 @@ function baseState(): FakeState {
 }
 
 describe("Notion 칸반 매핑", () => {
+  it("노션 데이터베이스 링크에서 ID를 뽑아냅니다", () => {
+    expect(parseNotionDatabaseId("https://app.notion.com/p/dfc41f2656fc832f8814818ad24f5c3c?v=86041f2656fc8223904908b21fcc75c6")).toBe("dfc41f26-56fc-832f-8814-818ad24f5c3c");
+    expect(parseNotionDatabaseId("https://www.notion.so/My-Board-1234abcd1234abcd1234abcd1234abcd")).toBe("1234abcd-1234-abcd-1234-abcd1234abcd");
+    expect(parseNotionDatabaseId("1234abcd-1234-abcd-1234-abcd1234abcd")).toBe("1234abcd-1234-abcd-1234-abcd1234abcd");
+    expect(parseNotionDatabaseId("짧은문자열")).toBeNull();
+  });
+
   it("status 옵션을 열로, 행을 카드로 읽어옵니다", async () => {
     const state = baseState();
     const board = await readKanbanBoard({ client: fakeClient(state), databaseId: "db", groupProperty: "상태" });

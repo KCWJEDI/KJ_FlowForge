@@ -48,6 +48,7 @@ const api: HubApi = {
   moveKanbanCard: (args) => ipcRenderer.invoke("hub:move-kanban-card", args),
   createKanbanCard: (args) => ipcRenderer.invoke("hub:create-kanban-card", args),
   deleteKanbanCard: (args) => ipcRenderer.invoke("hub:delete-kanban-card", args),
+  setKanbanDatabase: (url) => ipcRenderer.invoke("hub:set-kanban-database", url),
   onKanbanChanged: (listener) => {
     const wrapped = (_event: Electron.IpcRendererEvent, board: KanbanBoard): void => listener(board);
     ipcRenderer.on("hub:kanban-changed", wrapped);

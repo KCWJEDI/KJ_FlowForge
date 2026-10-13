@@ -65,6 +65,8 @@ const $ = {
   kanbanAdd: required<HTMLButtonElement>(document.getElementById("kanban-add"), "kanban-add"),
   kanbanRefresh: required<HTMLButtonElement>(document.getElementById("kanban-refresh"), "kanban-refresh"),
   kanbanMessage: required<HTMLElement>(document.getElementById("kanban-message"), "kanban-message"),
+  kanbanDbUrl: required<HTMLInputElement>(document.getElementById("kanban-db-url"), "kanban-db-url"),
+  kanbanDbApply: required<HTMLButtonElement>(document.getElementById("kanban-db-apply"), "kanban-db-apply"),
   dashboardProject: required<HTMLSelectElement>(document.getElementById("dashboard-project"), "dashboard-project"),
   dashboardProjectRenameInput: required<HTMLInputElement>(document.getElementById("dashboard-project-rename-input"), "dashboard-project-rename-input"),
   dashboardProjectRename: required<HTMLButtonElement>(document.getElementById("dashboard-project-rename"), "dashboard-project-rename"),
@@ -2110,6 +2112,30 @@ async function moveKanbanCardTo(cardId: string, columnId: string): Promise<void>
   }
 }
 
+async function applyKanbanDatabase(): Promise<void> {
+  const url = $.kanbanDbUrl.value.trim();
+  if (!url) {
+    $.kanbanMessage.className = "error-text";
+    $.kanbanMessage.textContent = "노션 데이터베이스 링크를 입력하세요.";
+    return;
+  }
+  $.kanbanDbApply.disabled = true;
+  $.kanbanMessage.className = "muted";
+  $.kanbanMessage.textContent = "연결을 확인하는 중입니다…";
+  try {
+    const board = await window.hub.setKanbanDatabase(url);
+    $.kanbanDbUrl.value = "";
+    renderKanban(board);
+    $.kanbanMessage.className = "muted";
+    $.kanbanMessage.textContent = "'" + (board.databaseTitle || "데이터베이스") + "'에 연결했습니다.";
+  } catch (error) {
+    $.kanbanMessage.className = "error-text";
+    $.kanbanMessage.textContent = "연결 실패: " + (error instanceof Error ? error.message : String(error));
+  } finally {
+    $.kanbanDbApply.disabled = false;
+  }
+}
+
 async function createKanbanCard(): Promise<void> {
   const title = $.kanbanNewTitle.value.trim();
   if (!title) {
@@ -3429,6 +3455,10 @@ function bindEvents(): void {
   $.kanbanAdd.addEventListener("click", () => void createKanbanCard());
   $.kanbanNewTitle.addEventListener("keydown", (event) => {
     if (event.key === "Enter") void createKanbanCard();
+  });
+  $.kanbanDbApply.addEventListener("click", () => void applyKanbanDatabase());
+  $.kanbanDbUrl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") void applyKanbanDatabase();
   });
   $.dashboardProject.addEventListener("change", () => {
     document.querySelectorAll(".dashboard-extra-card").forEach((card) => card.remove());

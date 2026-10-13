@@ -413,6 +413,8 @@ export interface HubApi {
   createKanbanCard(args: { title: string; columnId?: string }): Promise<KanbanBoard>;
   /** 카드를 삭제합니다(노션 페이지 보관). */
   deleteKanbanCard(args: { cardId: string }): Promise<KanbanBoard>;
+  /** 노션 데이터베이스 링크/ID로 칸반 연결을 바꿉니다. */
+  setKanbanDatabase(url: string): Promise<KanbanBoard>;
   /** 칸반보드 변경 구독(폴링/조작 결과). */
   onKanbanChanged(listener: (board: KanbanBoard) => void): () => void;
   /** 업데이트 상태 변경 구독(확인/다운로드/완료/오류). */

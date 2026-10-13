@@ -1574,6 +1574,19 @@ body.theme-light {
   padding: 2px 8px;
 }
 
+.kanban-db-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.kanban-db-row input {
+  flex: 1 1 auto;
+  min-width: 240px;
+}
+
+
 
 
 .content {
