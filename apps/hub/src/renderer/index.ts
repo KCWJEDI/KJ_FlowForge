@@ -67,6 +67,8 @@ const $ = {
   kanbanMessage: required<HTMLElement>(document.getElementById("kanban-message"), "kanban-message"),
   kanbanDbUrl: required<HTMLInputElement>(document.getElementById("kanban-db-url"), "kanban-db-url"),
   kanbanDbApply: required<HTMLButtonElement>(document.getElementById("kanban-db-apply"), "kanban-db-apply"),
+  kanbanDbList: required<HTMLButtonElement>(document.getElementById("kanban-db-list"), "kanban-db-list"),
+  kanbanDbOptions: required<HTMLElement>(document.getElementById("kanban-db-options"), "kanban-db-options"),
   dashboardProject: required<HTMLSelectElement>(document.getElementById("dashboard-project"), "dashboard-project"),
   dashboardProjectRenameInput: required<HTMLInputElement>(document.getElementById("dashboard-project-rename-input"), "dashboard-project-rename-input"),
   dashboardProjectRename: required<HTMLButtonElement>(document.getElementById("dashboard-project-rename"), "dashboard-project-rename"),
@@ -2112,6 +2114,43 @@ async function moveKanbanCardTo(cardId: string, columnId: string): Promise<void>
   }
 }
 
+async function showKanbanDatabases(): Promise<void> {
+  $.kanbanDbList.disabled = true;
+  $.kanbanMessage.className = "muted";
+  $.kanbanMessage.textContent = "공유된 데이터베이스를 확인하는 중입니다…";
+  try {
+    const options = await window.hub.listKanbanDatabases();
+    $.kanbanDbOptions.innerHTML = "";
+    if (options.length === 0) {
+      $.kanbanDbOptions.hidden = true;
+      $.kanbanMessage.className = "error-text";
+      $.kanbanMessage.textContent = "공유된 데이터베이스가 없습니다. 노션에서 보드의 '···' → 연결(Connections)에 KJ_FlowForge를 추가하세요.";
+      return;
+    }
+    for (const option of options) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "kanban-db-option";
+      const columns = option.columns.length > 0 ? option.columns.join(" / ") : "칸반 열 없음";
+      item.textContent = (option.title || "(제목 없음)") + " · 카드 " + option.rowCount + "개 · " + columns;
+      item.addEventListener("click", () => void applyKanbanDatabaseById(option.id));
+      $.kanbanDbOptions.appendChild(item);
+    }
+    $.kanbanDbOptions.hidden = false;
+    $.kanbanMessage.className = "muted";
+    $.kanbanMessage.textContent = "연결할 데이터베이스를 아래에서 선택하세요.";
+  } catch (error) {
+    $.kanbanMessage.className = "error-text";
+    $.kanbanMessage.textContent = "목록을 가져오지 못했습니다: " + (error instanceof Error ? error.message : String(error));
+  } finally {
+    $.kanbanDbList.disabled = false;
+  }
+}
+
+async function applyKanbanDatabaseById(databaseId: string): Promise<void> {
+  await applyKanbanConnection(databaseId);
+}
+
 async function applyKanbanDatabase(): Promise<void> {
   const url = $.kanbanDbUrl.value.trim();
   if (!url) {
@@ -2119,12 +2158,17 @@ async function applyKanbanDatabase(): Promise<void> {
     $.kanbanMessage.textContent = "노션 데이터베이스 링크를 입력하세요.";
     return;
   }
+  await applyKanbanConnection(url);
+}
+
+async function applyKanbanConnection(input: string): Promise<void> {
   $.kanbanDbApply.disabled = true;
   $.kanbanMessage.className = "muted";
   $.kanbanMessage.textContent = "연결을 확인하는 중입니다…";
   try {
-    const board = await window.hub.setKanbanDatabase(url);
+    const board = await window.hub.setKanbanDatabase(input);
     $.kanbanDbUrl.value = "";
+    $.kanbanDbOptions.hidden = true;
     renderKanban(board);
     $.kanbanMessage.className = "muted";
     $.kanbanMessage.textContent = "'" + (board.databaseTitle || "데이터베이스") + "'에 연결했습니다.";
@@ -3460,6 +3504,7 @@ function bindEvents(): void {
   $.kanbanDbUrl.addEventListener("keydown", (event) => {
     if (event.key === "Enter") void applyKanbanDatabase();
   });
+  $.kanbanDbList.addEventListener("click", () => void showKanbanDatabases());
   $.dashboardProject.addEventListener("change", () => {
     document.querySelectorAll(".dashboard-extra-card").forEach((card) => card.remove());
     restoreProjectWorkBranches();

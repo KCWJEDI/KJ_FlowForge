@@ -43,7 +43,12 @@ import { ProjectAccess, type ProjectRegistry } from "./runtime/project-access";
 import type { RuntimeContext } from "./runtime/runtime-context";
 import { SettingsService } from "./runtime/settings-service";
 import { KanbanService } from "./runtime/kanban-service";
-import { parseNotionDatabaseId } from "./integrations/notion-kanban";
+import {
+  findChildDatabaseId,
+  listAccessibleDatabases,
+  parseNotionDatabaseId,
+  type AccessibleDatabase,
+} from "./integrations/notion-kanban";
 
 /**
  * 앱의 런타임 파사드입니다.
@@ -371,12 +376,27 @@ export class HubRuntime extends EventEmitter {
    * 오류로 알려주고 기존 연결을 유지합니다. 성공 시 .env에 저장해 재시작 후에도 남습니다.
    */
   public async setKanbanDatabase(input: string): Promise<KanbanBoard> {
-    const databaseId = parseNotionDatabaseId(input);
-    if (!databaseId) {
+    const parsedId = parseNotionDatabaseId(input);
+    if (!parsedId) {
       throw new Error("노션 데이터베이스 링크 또는 ID를 확인할 수 없습니다. 링크를 다시 복사해 주세요.");
     }
-    if (this.notion.rawClient() === null) {
+    const client = this.notion.rawClient();
+    if (client === null) {
       throw new Error("Notion 통합 토큰이 설정되지 않았습니다. 설정 → .env 수정에서 NOTION_TOKEN을 입력하세요.");
+    }
+    // 붙여넣은 ID가 데이터베이스가 아니라 페이지면, 그 페이지의 자식 데이터베이스를 사용합니다.
+    let databaseId = parsedId;
+    try {
+      await client.databases.retrieve({ database_id: parsedId });
+    } catch {
+      const child = await findChildDatabaseId(client, parsedId);
+      if (child) {
+        databaseId = child;
+      } else {
+        throw new Error(
+          "이 링크의 데이터베이스를 찾을 수 없습니다. 노션에서 해당 보드의 '···' → 연결(Connections)에 KJ_FlowForge를 추가했는지 확인해 주세요.",
+        );
+      }
     }
     this.kanban.setDatabase(databaseId);
     try {
@@ -389,6 +409,15 @@ export class HubRuntime extends EventEmitter {
       this.kanban.setDatabase(this.config.kanbanDatabaseId);
       throw error;
     }
+  }
+
+  /** 통합이 접근할 수 있는 노션 데이터베이스 목록을 반환합니다. */
+  public listKanbanDatabases(): Promise<AccessibleDatabase[]> {
+    const client = this.notion.rawClient();
+    if (client === null) {
+      throw new Error("Notion 통합 토큰이 설정되지 않았습니다. 설정 → .env 수정에서 NOTION_TOKEN을 입력하세요.");
+    }
+    return listAccessibleDatabases(client);
   }
 
   private emitState(): void {

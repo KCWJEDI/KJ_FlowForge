@@ -270,3 +270,72 @@ export function parseNotionDatabaseId(input: string): string | null {
   return normalize(matches[matches.length - 1]!.toLowerCase());
 }
 
+export interface AccessibleDatabase {
+  id: string;
+  title: string;
+  /** 카드 수(최대 100까지 집계, 초과 시 100으로 표시) */
+  rowCount: number;
+  /** status/select 속성 이름 */
+  groupProperty: string | null;
+  /** status/select 옵션(칸반 열) */
+  columns: string[];
+}
+
+/**
+ * 통합이 접근할 수 있는(공유된) 데이터베이스 목록을 반환합니다.
+ *
+ * 어떤 데이터베이스가 보이는지 사용자가 직접 확인해 고를 수 있게 합니다.
+ * 공유되지 않은 데이터베이스는 이 목록에 나타나지 않습니다.
+ */
+export async function listAccessibleDatabases(client: Client): Promise<AccessibleDatabase[]> {
+  const response = (await client.search({
+    filter: { property: "object", value: "database" },
+    page_size: 100,
+  })) as unknown as {
+    results?: Array<{ id: string; title?: NotionRichText[]; properties?: Record<string, NotionPropertySchema> }>;
+  };
+  const databases: AccessibleDatabase[] = [];
+  for (const database of response.results ?? []) {
+    if (!database.id) continue;
+    const schema = database.properties ?? {};
+    const resolved = resolveGroupSchema(schema, "");
+    const columns = resolved.options.map((option) => option.name);
+    let rowCount = 0;
+    try {
+      const q = (await client.databases.query({
+        database_id: database.id,
+        page_size: PAGE_SIZE,
+      })) as unknown as { results?: unknown[] };
+      rowCount = (q.results ?? []).length;
+    } catch {
+      rowCount = 0;
+    }
+    databases.push({
+      id: database.id,
+      title: richTextToString(database.title) || "(제목 없음)",
+      rowCount,
+      groupProperty: resolved.name,
+      columns,
+    });
+  }
+  return databases;
+}
+
+/**
+ * 페이지/블록 ID 안에 있는 자식 데이터베이스 ID를 찾습니다.
+ *
+ * 사용자가 보드의 "데이터베이스"가 아니라 그것을 담은 "페이지" 링크를 붙여넣는
+ * 경우가 많아, 페이지 링크로도 연결할 수 있게 합니다.
+ */
+export async function findChildDatabaseId(client: Client, pageId: string): Promise<string | null> {
+  try {
+    const response = (await client.blocks.children.list({ block_id: pageId, page_size: 100 })) as unknown as {
+      results?: Array<{ id: string; type?: string; child_database?: { title?: unknown } }>;
+    };
+    const child = (response.results ?? []).find((block) => block.type === "child_database" && block.id);
+    return child?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+

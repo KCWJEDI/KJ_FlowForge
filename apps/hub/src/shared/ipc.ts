@@ -350,6 +350,15 @@ export interface KanbanMoveInput {
   expectedEditedAt?: string;
 }
 
+/** 통합이 접근 가능한 노션 데이터베이스(칸반 후보) */
+export interface KanbanDatabaseOption {
+  id: string;
+  title: string;
+  rowCount: number;
+  groupProperty: string | null;
+  columns: string[];
+}
+
 export interface DashboardState {
   startedAt: string;
   config: PublicConfig;
@@ -415,6 +424,8 @@ export interface HubApi {
   deleteKanbanCard(args: { cardId: string }): Promise<KanbanBoard>;
   /** 노션 데이터베이스 링크/ID로 칸반 연결을 바꿉니다. */
   setKanbanDatabase(url: string): Promise<KanbanBoard>;
+  /** 통합이 접근 가능한 노션 데이터베이스 목록을 가져옵니다. */
+  listKanbanDatabases(): Promise<KanbanDatabaseOption[]>;
   /** 칸반보드 변경 구독(폴링/조작 결과). */
   onKanbanChanged(listener: (board: KanbanBoard) => void): () => void;
   /** 업데이트 상태 변경 구독(확인/다운로드/완료/오류). */
