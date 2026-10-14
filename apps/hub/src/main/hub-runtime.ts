@@ -44,7 +44,7 @@ import type { RuntimeContext } from "./runtime/runtime-context";
 import { SettingsService } from "./runtime/settings-service";
 import { KanbanService } from "./runtime/kanban-service";
 import {
-  findChildDatabaseId,
+  findChildDatabaseIds,
   listAccessibleDatabases,
   parseNotionDatabaseId,
   type AccessibleDatabase,
@@ -389,12 +389,28 @@ export class HubRuntime extends EventEmitter {
     try {
       await client.databases.retrieve({ database_id: parsedId });
     } catch {
-      const child = await findChildDatabaseId(client, parsedId);
-      if (child) {
-        databaseId = child;
+      // 페이지 링크일 수 있으므로 그 안의 자식 데이터베이스를 찾습니다(중첩 포함).
+      const children = await findChildDatabaseIds(client, parsedId, 4);
+      const usable: string[] = [];
+      for (const childId of children) {
+        try {
+          const info = (await client.databases.retrieve({ database_id: childId })) as unknown as {
+            properties?: Record<string, { type?: string }>;
+          };
+          const hasGroup = Object.values(info.properties ?? {}).some(
+            (property) => property.type === "status" || property.type === "select",
+          );
+          if (hasGroup) usable.push(childId);
+        } catch {
+          /* 접근 불가한 자식은 건너뜁니다. */
+        }
+      }
+      if (usable.length > 0) {
+        databaseId = usable[0]!;
       } else {
         throw new Error(
-          "이 링크의 데이터베이스를 찾을 수 없습니다. 노션에서 해당 보드의 '···' → 연결(Connections)에 KJ_FlowForge를 추가했는지 확인해 주세요.",
+          "이 링크에서 칸반으로 쓸 수 있는(status/select 속성이 있는) 데이터베이스를 찾지 못했습니다. " +
+            "'공유된 DB 보기'로 접근 가능한 목록을 확인하거나, 노션 보드의 '···' → 연결(Connections)에 KJ_FlowForge를 추가해 주세요.",
         );
       }
     }

@@ -295,15 +295,35 @@ export async function listAccessibleDatabases(client: Client): Promise<Accessibl
     results?: Array<{ id: string; title?: NotionRichText[]; properties?: Record<string, NotionPropertySchema> }>;
   };
   const databases: AccessibleDatabase[] = [];
+  const seen = new Set<string>();
+  // 검색이 놓치는 중첩 데이터베이스를 보완하기 위해, 공유된 페이지들도 훑어 찾습니다.
+  const sharedPages = (await client.search({ filter: { property: "object", value: "page" }, page_size: 100 })) as unknown as {
+    results?: Array<{ id: string }>;
+  };
+  const discoveredIds = new Set<string>();
   for (const database of response.results ?? []) {
-    if (!database.id) continue;
+    if (database.id) discoveredIds.add(database.id);
+  }
+  for (const page of sharedPages.results ?? []) {
+    if (!page.id) continue;
+    for (const childId of await findChildDatabaseIds(client, page.id, 4)) discoveredIds.add(childId);
+  }
+  for (const databaseId of discoveredIds) {
+    if (seen.has(databaseId)) continue;
+    seen.add(databaseId);
+    let database: { id: string; title?: NotionRichText[]; properties?: Record<string, NotionPropertySchema> };
+    try {
+      database = (await client.databases.retrieve({ database_id: databaseId })) as unknown as typeof database;
+    } catch {
+      continue;
+    }
     const schema = database.properties ?? {};
     const resolved = resolveGroupSchema(schema, "");
     const columns = resolved.options.map((option) => option.name);
     let rowCount = 0;
     try {
       const q = (await client.databases.query({
-        database_id: database.id,
+        database_id: databaseId,
         page_size: PAGE_SIZE,
       })) as unknown as { results?: unknown[] };
       rowCount = (q.results ?? []).length;
@@ -311,7 +331,7 @@ export async function listAccessibleDatabases(client: Client): Promise<Accessibl
       rowCount = 0;
     }
     databases.push({
-      id: database.id,
+      id: databaseId,
       title: richTextToString(database.title) || "(제목 없음)",
       rowCount,
       groupProperty: resolved.name,
@@ -337,5 +357,43 @@ export async function findChildDatabaseId(client: Client, pageId: string): Promi
   } catch {
     return null;
   }
+}
+
+/**
+ * 페이지/블록을 재귀적으로 훑어 그 안의 모든 자식 데이터베이스 ID를 모읍니다.
+ *
+ * 공유는 최상위 페이지에만 되어 있고 실제 칸반 데이터베이스가 그 안에 여러 단계로
+ * 중첩된 경우가 많아, "페이지 링크만 붙여넣은" 상황을 해결합니다.
+ */
+export async function findChildDatabaseIds(client: Client, rootId: string, maxDepth = 4): Promise<string[]> {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  const walk = async (id: string, depth: number): Promise<void> => {
+    if (depth > maxDepth || seen.has(id)) return;
+    seen.add(id);
+    let cursor: string | undefined;
+    do {
+      let response: { results?: Array<{ id: string; type?: string }>; has_more?: boolean; next_cursor?: string | null };
+      try {
+        response = (await client.blocks.children.list({
+          block_id: id,
+          page_size: PAGE_SIZE,
+          start_cursor: cursor,
+        })) as unknown as typeof response;
+      } catch {
+        return;
+      }
+      for (const block of response.results ?? []) {
+        if (!block.id) continue;
+        if (block.type === "child_database") found.push(block.id);
+        else if (["child_page", "column_list", "column", "toggle", "synced_block", "template"].includes(block.type ?? "")) {
+          await walk(block.id, depth + 1);
+        }
+      }
+      cursor = response.has_more && response.next_cursor ? response.next_cursor : undefined;
+    } while (cursor);
+  };
+  await walk(rootId, 0);
+  return found;
 }
 
